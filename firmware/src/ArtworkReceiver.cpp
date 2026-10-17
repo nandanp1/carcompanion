@@ -13,6 +13,7 @@ UINT jpegWrite(JDEC* decoder,void* rgb,JRECT* rect) {
     auto* buffer=static_cast<JpegBuffer*>(decoder->device);
     return buffer->writeRgb888(static_cast<const uint8_t*>(rgb),rect->left,rect->top,rect->right,rect->bottom)?1:0;
 }
+void* allocateRgb565(size_t bytes) { return heap_caps_malloc(bytes,MALLOC_CAP_8BIT); }
 }
 void ArtworkReceiver::init(DisplayManager& display,std::function<void(uint8_t,uint16_t,uint32_t)> status) {
     display_=&display; status_=status; mutex_=xSemaphoreCreateMutex(); assert(mutex_);
@@ -92,31 +93,32 @@ void ArtworkReceiver::decode() {
         ESP_LOGI("Artwork","prepare id=%u result=%d image=%ux%u input=%u/%lu bytes",id,prepared,decoder.width,decoder.height,
             buffer.offset,static_cast<unsigned long>(size));
         if(prepared==JDR_OK && decoder.width && decoder.height && decoder.width<=240 && decoder.height<=240) {
-            // C6 has no PSRAM. Keep at most ONE output image: detach under the
-            // LVGL mutex before freeing, decode without holding that mutex.
-            cached_=0; display_->detachArtwork();
+            // C6 has no PSRAM. Transfer the sole output allocation from LVGL
+            // to the decoder while no LVGL reader can retain a reference.
+            // Reusing it prevents fragmentation from shrinking the next cover.
+            cached_=0; auto output=display_->detachArtwork();
             unsigned scale=0;
             buffer.width=decoder.width; buffer.height=decoder.height;
-            ESP_LOGI("Artwork","allocate RGB565 bytes=%u heap=%u largest=%u minimum=%u",buffer.width*buffer.height*2,
+            ESP_LOGI("Artwork","RGB565 requested=%u reusable=%u heap=%u largest=%u minimum=%u",buffer.width*buffer.height*2,output.capacity(),
                 heap_caps_get_free_size(MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),esp_get_minimum_free_heap_size());
-            auto* output=static_cast<uint8_t*>(heap_caps_malloc(buffer.width*buffer.height*2,MALLOC_CAP_8BIT));
+            bool allocated=output.ensure(buffer.width*buffer.height*2,allocateRgb565);
             // A connected C6 can have a fragmented internal heap. ROM TJpgDec
             // supports true 1/2 scaling, avoiding a second intermediate image.
-            if(!output && buffer.width>=2 && buffer.height>=2) {
+            if(!allocated && buffer.width>=2 && buffer.height>=2) {
                 ESP_LOGW("Artwork","full RGB565 allocation unavailable; trying half-scale");
                 scale=1; buffer.width>>=1; buffer.height>>=1;
-                output=static_cast<uint8_t*>(heap_caps_malloc(buffer.width*buffer.height*2,MALLOC_CAP_8BIT));
+                allocated=output.ensure(buffer.width*buffer.height*2,allocateRgb565);
             }
-            if(output) {
-                buffer.output=reinterpret_cast<uint16_t*>(output);
+            if(allocated) {
+                buffer.output=reinterpret_cast<uint16_t*>(output.data());
                 const JRESULT decoded=jd_decomp(&decoder,jpegWrite,scale);
                 ESP_LOGI("Artwork","decode id=%u result=%d scale=%u input=%u/%lu bytes elapsed=%llu ms",id,decoded,scale,
                     buffer.offset,static_cast<unsigned long>(size),static_cast<unsigned long long>((esp_timer_get_time()-started)/1000));
                 if(decoded==JDR_OK) {
-                    display_->artwork(output,buffer.width,buffer.height,expectedCrc_);
+                    display_->artwork(std::move(output),buffer.width,buffer.height,expectedCrc_);
                     cached_=expectedCrc_; result=COMPLETE;
                     ESP_LOGI("Artwork","decoded %u x %u RGB565",buffer.width,buffer.height);
-                } else free(output);
+                }
             } else ESP_LOGE("Artwork","RGB565 allocation failed even at half-scale; largest=%u",heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         }
     } else ESP_LOGW("Artwork","CRC mismatch id=%u expected=%08lx actual=%08lx",id,static_cast<unsigned long>(expectedCrc_),static_cast<unsigned long>(actualCrc));

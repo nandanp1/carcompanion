@@ -136,17 +136,22 @@ void DisplayManager::clock(uint64_t unixSeconds,int offsetMinutes) {
 void DisplayManager::demo(bool enabled) {
     update([enabled](DisplayState& state) { const bool connected=state.connected; state=DisplayState{}; state.connected=connected; state.demo=enabled; });
 }
-void DisplayManager::detachArtwork() {
+ArtworkBuffer DisplayManager::detachArtwork() {
+    ArtworkBuffer detached;
     xSemaphoreTake(gui_,portMAX_DELAY); music_.artwork(nullptr); cachedCrc_=0; decodedValid_=false;
-    if(image_.data) { lv_image_cache_drop(&image_); free(const_cast<uint8_t*>(image_.data)); image_={}; }
+    if(image_.data) lv_image_cache_drop(&image_);
+    image_={}; detached=std::move(artworkBuffer_);
     xSemaphoreGive(gui_);
     wake();
+    return detached;
 }
-void DisplayManager::artwork(uint8_t* pixels,uint16_t width,uint16_t height,uint32_t crc) {
+void DisplayManager::artwork(ArtworkBuffer&& pixels,uint16_t width,uint16_t height,uint32_t crc) {
     xSemaphoreTake(gui_,portMAX_DELAY);
+    assert(!artworkBuffer_.data() && pixels.data() && pixels.capacity()>=static_cast<size_t>(width)*height*2);
+    artworkBuffer_=std::move(pixels);
     image_={}; image_.header.magic=LV_IMAGE_HEADER_MAGIC; image_.header.cf=LV_COLOR_FORMAT_RGB565;
     image_.header.w=width; image_.header.h=height; image_.header.stride=width*2;
-    image_.data_size=width*height*2; image_.data=pixels; cachedCrc_=crc; decodedValid_=true; music_.artwork(&image_);
+    image_.data_size=width*height*2; image_.data=artworkBuffer_.data(); cachedCrc_=crc; decodedValid_=true; music_.artwork(&image_);
     xSemaphoreGive(gui_);
     wake();
 }

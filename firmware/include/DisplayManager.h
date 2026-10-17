@@ -1,5 +1,6 @@
 #pragma once
 #include "Board.h"
+#include "ArtworkBuffer.h"
 #include "SettingsManager.h"
 #include "Screens.h"
 #include "TouchManager.h"
@@ -16,8 +17,8 @@ public:
     void setBrightness(uint8_t);
     void clock(uint64_t unixSeconds,int offsetMinutes);
     void demo(bool enabled);
-    void detachArtwork();
-    void artwork(uint8_t* pixels,uint16_t width,uint16_t height,uint32_t crc);
+    ArtworkBuffer detachArtwork();
+    void artwork(ArtworkBuffer&& pixels,uint16_t width,uint16_t height,uint32_t crc);
 private:
     static void run(void*);
     static void flush(lv_display_t*,const lv_area_t*,uint8_t*);
@@ -39,6 +40,7 @@ private:
     lv_obj_t* screens_[3]={}; lv_display_t* lvDisplay_=nullptr;
     TouchManager touch_;
     lv_image_dsc_t image_={}; uint32_t cachedCrc_=0; bool decodedValid_=false;
+    ArtworkBuffer artworkBuffer_;
     uint64_t clockUnix_=0,clockAt_=0; int offsetMinutes_=0;
     std::atomic<uint8_t> requestedBrightness_{0};
 };

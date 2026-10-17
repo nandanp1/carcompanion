@@ -1,10 +1,45 @@
 #include "DisplayState.h"
 #include "Protocol.h"
 #include "JpegBuffer.h"
+#include "ArtworkBuffer.h"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
+namespace {
+unsigned rgbAllocations=0;
+bool failRgbAllocation=false;
+void* testRgbAllocate(size_t bytes) { ++rgbAllocations; return failRgbAllocation?nullptr:std::malloc(bytes); }
+}
 int main() {
+    // A replacement cover must reuse the full-size allocation even when the
+    // allocator cannot provide any new contiguous block (observed on C6).
+    {
+        ArtworkBuffer displayOwned;
+        assert(displayOwned.ensure(240*240*2,testRgbAllocate));
+        auto* original=displayOwned.data(); original[0]=0x5a;
+        assert(rgbAllocations==1 && displayOwned.capacity()==115200);
+        ArtworkBuffer decoderOwned=std::move(displayOwned);
+        assert(!displayOwned.data() && displayOwned.capacity()==0);
+        failRgbAllocation=true;
+        assert(decoderOwned.ensure(115200,testRgbAllocate));
+        assert(decoderOwned.ensure(28800,testRgbAllocate));
+        assert(decoderOwned.data()==original && decoderOwned.data()[0]==0x5a && rgbAllocations==1);
+        assert(!decoderOwned.ensure(ArtworkBuffer::MaximumBytes+1,testRgbAllocate));
+        displayOwned=std::move(decoderOwned);
+        assert(displayOwned.data()==original && !decoderOwned.data());
+        assert(displayOwned.capacity()==115200); // preserve capacity after a smaller image
+    }
+    {
+        failRgbAllocation=false;
+        ArtworkBuffer output; assert(output.ensure(28800,testRgbAllocate));
+        failRgbAllocation=true;
+        assert(!output.ensure(115200,testRgbAllocate));
+        assert(!output.data() && output.capacity()==0); // failed growth has no dangling owner
+        failRgbAllocation=false;
+        assert(output.ensure(28800,testRgbAllocate)); // bounded half-scale recovery
+        ArtworkBuffer failedDecode=std::move(output);
+        assert(!output.data()); // failed decoder scope frees exactly once under ASan
+    }
     PageNavigation pages;
     assert(pages.visible()==Page::Driving);
     assert(!pages.swipe(-40,0,100)); assert(!pages.swipe(-90,70,100)); assert(!pages.swipe(-90,0,1000));

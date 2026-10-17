@@ -41,7 +41,7 @@ Perform interactions while parked, then have a passenger observe any driving che
 | Brightness 5/50/100 percent | Panel responds without flicker; value survives reboot | Not run |
 | First association/bond | Correct physical display selected; encrypted data access succeeds | Not run |
 | MTU23 and larger negotiated MTU | Same states and image; no fixed chunk-size assumption | Not run |
-| 240×240 JPEG | Correct colors/orientation, bounded memory, complete status after decode | Full-scale decode/CRC/attachment verified on device; user confirmed visible cover. Formal color/orientation check pending. |
+| 240×240 JPEG | Correct colors/orientation, bounded memory, complete status after decode | Full-scale decode/CRC/attachment and buffer reuse verified across three covers; user confirmed visible covers stay full size. Formal color/orientation check pending. |
 | Duplicate/corrupt/missing image packet | Idempotent duplicate, rejection/retry, no reboot | Not run |
 | Oversized/progressive/invalid JPEG | Clean failure, no memory overwrite, UI remains responsive | Not run |
 | Disconnect halfway through image | Incomplete data released; successful retransfer after reconnect | Not run |
