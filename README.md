@@ -1,122 +1,63 @@
-# Car Companion · 986
+# Car Companion
 
-A native Android companion and standalone ESP32-C6 driving display for a 1999 Porsche Boxster 986. The app is named **Car Companion**. The display receives GPS speed, optional road-matched limits, Spotify metadata/artwork and available navigation instructions over BLE. The phone keeps its normal Android Auto connection to the Alpine head unit.
+A small touchscreen display for a 1999 Porsche Boxster 986. It shows speed, Google Maps directions and Spotify, using an Android phone and a Waveshare ESP32-C6-Touch-AMOLED-2.16.
 
-This repository contains working implementation code, build projects, automated tests and bench-test instructions. **It is a first hardware-validation release, not a claim of road-tested firmware.** See [validation results](docs/validation.md) for commands actually executed and [the acceptance checklist](docs/testing.md) for physical tests still required.
+The idea is to put the useful stuff near the rearview mirror, with a simple black screen that feels at home in the car.
 
-Local deliverables are packaged in `artifacts/car-companion-0.1.0.zip`: source, an installable debug APK, firmware flash files and SHA-256 checksums. After building both projects and running `idf.py merge-bin`, regenerate the package with `python3 tools/package_release.py`. The normal segmented flash preserves settings; the included factory image resets settings and Bluetooth bonds.
+## How we got here
 
-## What is implemented
+We started with a screen and an idea: give an older Boxster a little more information without replacing its dashboard.
 
-| Area | Implementation |
-| --- | --- |
-| Exact board support | Waveshare ESP32-C6-Touch-AMOLED-2.16; CO5300 QSPI initialization, CST9220 touch through the manufacturer's compatible CST9217 component, AXP2101 power setup |
-| Display | Three LVGL 9 screens, black AMOLED styling, large mph, source freshness, swipe thresholds, animated page changes, navigation takeover/return, persistent brightness/page |
-| Android | Kotlin/Compose, system companion-device association, encrypted BLE, foreground service, permission onboarding, preview, settings and bounded diagnostics |
-| Driving | Fused Location speed in mph; stale/poor fixes render `—`; separate unknown/mock/HTTPS road-matched speed-limit providers |
-| Spotify | Active MediaSession metadata, full artwork on Music and compact covers on Driving/Navigation, 240×240 baseline JPEG with bounded fallback, CRC32 transfer/cache, optional transport controls |
-| Navigation | Experimental conservative Google Maps notification parser, field inspector, mock route provider and structured integration interface |
-| Transport | Six custom GATT characteristics, MTU-aware framing, sequenced byte offsets, duplicates/retries, one-write flow control, reconnect and state restoration |
-| Memory | No full framebuffer or PSRAM assumption; two 10-line DMA stripes, compressed artwork capped at 32 KiB, one decoded image capped at 240×240 RGB565 |
+First, we needed a source for the driving data. The Waveshare board has no GPS receiver, so the phone supplies its speed. Directions were a separate problem: Google Maps doesn't give other apps a direct feed of its current route. Instead, we read the directions in its Android notifications and send them to the display over Bluetooth.
 
-Google Maps does not promise third-party access to its active navigation. The parser only displays explicit supported text; unavailable fields stay unavailable. No AccessibilityService, private Android Auto API, Spotify Web API login, Raspberry Pi or Bluetooth audio endpoint is involved. A real road-data service is optional and must be supplied/configured by the user; no speed-limit database or fabricated default is bundled.
+Once the screen, touch controls and Bluetooth worked, we added Spotify. That's where things got messy. Covers didn't always appear, songs took too long to update, and long titles stacked over other text. We fixed the image transfer, made better use of the limited memory and cleaned up the text.
 
-## Architecture
+Next came automatic reconnection when the display powers on, album covers on every page, and switching to Navigation when a route starts. Testing on the phone caught a Maps notification format we hadn't handled, so we fixed that too.
+
+This is now running on the actual phone and display. Vehicle testing is still ahead.
+
+## What it shows
+
+- **Driving:** speed in mph, time, connection status and a small album cover with the current song.
+- **Navigation:** the next turn, distance, road and arrival time when Maps makes them available, plus speed and the current song.
+- **Music:** a large album cover, title, artist, progress and playback controls.
+
+From Driving, swipe left for Music or right for Navigation. A new route opens Navigation automatically. You can still swipe to another page while navigating.
 
 ```mermaid
 flowchart LR
-    GPS[Android Fused Location] --> State[Shared DisplayState]
-    Maps[Maps public notifications] --> Parser[Conservative parser + diagnostics]
-    Parser --> State
-    Spotify[Spotify MediaSession] --> State
-    Spotify --> JPEG[Resize / baseline JPEG / CRC32]
-    Road[Optional road-matching provider] --> State
-    State --> Preview[Compose preview]
-    State --> Client[Foreground service / BLE client]
-    JPEG --> Client
-    Client <-->|Encrypted custom GATT| BLE[ESP32-C6 NimBLE]
-    BLE --> Model[DisplayManager]
-    BLE --> Art[Bounded ArtworkReceiver / JPEG worker]
-    Art --> Model
-    Model --> LVGL[Driving / Navigation / Music]
-    Touch[CST9220 touch] --> LVGL
-    LVGL -->|Playback command| BLE
-    Phone[Phone Android Auto] <-->|Existing wired or wireless link| Alpine[Alpine head unit]
+    GPS[Phone GPS: speed] --> App[Car Companion Android app]
+    Maps[Maps notifications: directions] --> App
+    Spotify[Spotify: music and covers] --> App
+    App -->|Bluetooth| Display[Waveshare display]
 ```
 
-The firmware owns its LVGL task; JPEG decoding runs on a separate FreeRTOS task. The Android preview and BLE encoder share one state model. Navigation and metadata are snapshots rather than assumptions about data hidden inside Maps or Spotify. Each endpoint ages GPS data independently.
+Audio stays on the phone and car stereo. No Raspberry Pi needed.
 
-## Build the Android app
+## Try it yourself
 
-Install JDK 17+, Android SDK 36 and Build Tools 36.0.0, then open `android/` in Android Studio or run:
+You'll need the **exact Waveshare ESP32-C6-Touch-AMOLED-2.16 board**, an Android phone and a USB data cable.
 
-```sh
-cd android
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
+1. Install the display software using the [hardware guide](docs/hardware-setup.md). Back up its existing firmware first.
+2. Build and install the phone app using the [Android guide](docs/android-setup.md).
+3. Open Car Companion and choose **Connect a display**. Pair through the app.
+4. Allow the requested permissions, including **Car Companion: Maps & media** notification access, then start the companion.
+5. Try Spotify and a Maps route while parked, or use **Demo mode** for sample data.
 
-The project supports Android 8+ (API 26), targets API 36, and uses the checked-in Gradle wrapper. Configure `ANDROID_HOME` or an untracked `android/local.properties` for your SDK location. [Android setup](docs/android-setup.md) covers permissions, association, Spotify, foreground operation and demo mode.
+Once set up, the app can keep the connection running in the background. After Android restarts the app in the background, you may need to open it to resume GPS speed.
 
-## Build and flash the display
+## A few limits
 
-Use **ESP-IDF v5.5.3**, target **esp32c6**, with its RISC-V toolchain. The component manifest pins the manufacturer's display/touch libraries and LVGL. Artwork uses the C6's ROM TJpgDec software decoder with bounded input/output callbacks. From an activated ESP-IDF environment:
+Maps can change what its notifications contain. If an instruction is missing or out of date, the display leaves it unavailable. Speed comes separately from the phone's GPS.
 
-```sh
-cd firmware
-idf.py set-target esp32c6
-idf.py build
-idf.py -p /your/usb/serial/port flash monitor
-```
+Speed limits need a separate road-data service. None is included by default, so the limit shows `—` unless a valid source is configured. [More about speed limits](docs/speed-limits.md).
 
-Start on a USB-powered bench. In `idf.py menuconfig`, select Car Companion's simulated-data option to exercise all screens without a phone. Live builds begin with unavailable readings until the phone supplies data. The Android demo switch is another way to exercise the display explicitly.
+Artwork, reconnection and navigation switching work on the real devices. Road driving and Android Auto with the Alpine head unit still need testing. See the [recorded results](docs/validation.md).
 
-**Read [hardware setup](docs/hardware-setup.md) before flashing.** The vendor repository contains conflicting unused pin definitions; this project follows the actual board initialization and documents the evidence. Do not substitute another Waveshare C6/S3 AMOLED model. Do not connect vehicle 12 V directly to the board; it expects its supported USB supply.
+## Inside the repo
 
-## First use
+The phone app is in `android/`, display software in `firmware/`, and setup guides in `docs/`.
 
-1. Flash the board and power it from USB. Install/open Car Companion on your phone.
-2. Select **Connect a display**, grant the requested runtime permissions, choose the physical device and confirm pairing.
-3. Enable **Car Companion: Maps & media** in Android's Notification access settings.
-4. Start the companion while its activity is visible. Keep the user-visible service running for BLE/GPS; the activity may close.
-5. Start Spotify and inspect Maps diagnostics during a route. Leave speed-limit provider on **Unavailable** unless you have a valid road-matched source.
-6. Swipe left from Driving for Music, right for Navigation. A detected active route automatically opens Navigation; manual swipes still work. Ending the route restores the selection from before the route. Driving and Navigation retain a small current album cover beside the song and artist.
+For more detail: [testing](docs/testing.md), [troubleshooting](docs/troubleshooting.md), [Maps integration](docs/navigation-integration.md) and [Bluetooth protocol](protocol/specification.md).
 
-A cold background device-presence wake can restore BLE, but GPS after a stopped process requires a visible app start under Android's location rules. The project does not bypass force-stop, permission restrictions or OEM battery management.
-
-## Tests
-
-```sh
-# Repository root: independent protocol reference
-python3 -m unittest discover -s protocol -p 'test_*.py' -v
-
-# Real firmware parser versus that oracle, with address/UB sanitizers
-python3 tools/test_firmware_protocol.py
-
-# Native firmware state/protocol checks
-cmake -S firmware/tests -B firmware/tests/build
-cmake --build firmware/tests/build
-ctest --test-dir firmware/tests/build --output-on-failure
-
-# Android unit tests and lint: see build command above
-```
-
-See [testing instructions](docs/testing.md), [recorded results](docs/validation.md), and [troubleshooting](docs/troubleshooting.md). Emulator and host tests cannot establish real touch alignment, JPEG/color output, BLE pairing/radio behavior, notifications exposed by a specific Maps build, GPS road accuracy or Android Auto coexistence.
-
-## Repository
-
-```text
-android/             Android Studio project and Kotlin tests
-firmware/            ESP-IDF project, board adapter, LVGL screens and host tests
-protocol/            Wire specification, JSON schema, golden vectors and oracle
-docs/                Setup, integration limits, test results and hardware checklist
-tools/               Differential tests and repeatable local tooling
-```
-
-Further reading: [BLE protocol](protocol/specification.md), [navigation capabilities](docs/navigation-integration.md), [speed-limit adapter](docs/speed-limits.md), [Android Auto coexistence](docs/android-auto.md).
-
-## Open source and provenance
-
-New project code is MIT licensed; upstream libraries and font data retain their own licenses. See [third-party notices](THIRD_PARTY_NOTICES.md). This is an independent enthusiast project, unaffiliated with Porsche, Alpine, Spotify, Google or Waveshare. Names describe compatibility and integration targets.
-
-Hardware source: [Waveshare documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) and [official example repository](https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.16/tree/294543798f1a44e2f2c4d2976522323f2beee11d). Public Android capabilities and experimental boundaries are linked in the integration guides.
+An independent enthusiast project, [MIT licensed](LICENSE) and unaffiliated with Porsche. Built using [Waveshare's documentation and examples](docs/hardware-setup.md#verified-manufacturer-sources). See [third-party credits](THIRD_PARTY_NOTICES.md) for library and font licenses.
