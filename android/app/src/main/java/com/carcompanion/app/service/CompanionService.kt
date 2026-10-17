@@ -18,6 +18,8 @@ import androidx.core.content.ContextCompat
 import com.carcompanion.app.MainActivity
 import com.carcompanion.app.R
 import com.carcompanion.app.ble.BleClient
+import com.carcompanion.app.ble.BluetoothAddress
+import com.carcompanion.app.ble.DevicePresenceObserver
 import com.carcompanion.app.location.*
 import com.carcompanion.app.media.SpotifyMediaMonitor
 import com.carcompanion.app.model.*
@@ -69,34 +71,74 @@ class CompanionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            prefs.edit().putBoolean("service_enabled", false).apply()
+            AutoReconnectSettings.disarm(this)
+            DevicePresenceObserver.refresh(this)
             stopSelf(); return START_NOT_STICKY
         }
-        if (intent?.action != ACTION_RESUME_BLE && intent?.action != ACTION_SETTINGS) locationEnabled = true
-        if (!enterForeground()) return START_NOT_STICKY
-        if (!initialized) initialize()
-        else if (locationEnabled && !demoEnabled) gps.start()
-        prefs.edit().putBoolean("service_enabled", true).apply()
-        intent?.getStringExtra(EXTRA_ADDRESS)?.takeIf { it.isNotBlank() }?.let { address ->
-            prefs.edit().putString("device_address", address).apply()
-            runCatching { ble.connect(address) }.onFailure { AppStore.log("Device address: ${it.message}") }
+        val source = when {
+            intent == null -> ReconnectPolicy.Start.RESTART
+            intent.action == ACTION_RESUME_BLE -> ReconnectPolicy.Start.PRESENCE
+            intent.action == ACTION_SETTINGS -> ReconnectPolicy.Start.SETTINGS
+            else -> ReconnectPolicy.Start.USER
         }
+        val admission = ReconnectPolicy.admit(source, AutoReconnectSettings.isArmed(this),
+            prefs.getBoolean("service_enabled", false), initialized)
+        if (admission != ReconnectPolicy.Admission.START) {
+            // A presence intent queued before auto reconnect was disabled must not stop a live
+            // manual connection. Cold unarmed starts still shut down without entering foreground.
+            if (admission == ReconnectPolicy.Admission.STOP) stopSelf()
+            return START_NOT_STICKY
+        }
+        val requestedAddress = intent?.getStringExtra(EXTRA_ADDRESS)?.let {
+            runCatching { BluetoothAddress.canonicalize(it) }.getOrElse {
+                AppStore.log("Invalid saved device address")
+                null
+            }
+        }
+        if (source == ReconnectPolicy.Start.PRESENCE && requestedAddress != AutoReconnectSettings.selectedAddress(this)) {
+            AppStore.log("Ignored presence for a different display")
+            if (!initialized) stopSelf()
+            return if (initialized && AutoReconnectSettings.isArmed(this)) START_STICKY else START_NOT_STICKY
+        }
+        locationEnabled = ReconnectPolicy.useLocation(source, locationEnabled)
+        if (!enterForeground()) return START_NOT_STICKY
+        // A sticky null-Intent restart and a CDM wake restore BLE only, never a new location FGS.
+        locationEnabled = locationEnabled && granted(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (source == ReconnectPolicy.Start.USER) AutoReconnectSettings.arm(this)
+        requestedAddress?.let { prefs.edit().putString("device_address", it).apply() }
+        if (!initialized) initialize()
+        ble.setAutoReconnect(AutoReconnectSettings.isEnabled(this))
+        DevicePresenceObserver.refresh(this)
+        if (ReconnectPolicy.connectOnStart(source, AutoReconnectSettings.isArmed(this))) {
+            AutoReconnectSettings.selectedAddress(this)?.let { address ->
+                runCatching { ble.connect(address) }.onFailure { AppStore.log("Device address: ${it.message}") }
+            }
+        }
+        refreshGps()
         when (intent?.action) {
             ACTION_SETTINGS -> applySettings()
             ACTION_DEMO -> setDemo(intent.getBooleanExtra(EXTRA_ENABLED, false))
         }
-        // Do not restart a location FGS from a stopped/background process without a visible action.
-        return START_NOT_STICKY
+        return if (AutoReconnectSettings.isArmed(this)) START_STICKY else START_NOT_STICKY
+    }
+
+    private fun notification(): android.app.Notification {
+        val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val stop = PendingIntent.getService(this, 1, Intent(this, CompanionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
+        val connected = initialized && ble.connection.value.connected
+        val description = when {
+            connected -> "Display connected · tap to manage"
+            AutoReconnectSettings.isEnabled(this) -> "Waiting for your display · reconnects automatically"
+            else -> "Display disconnected · tap to connect"
+        }
+        return NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_companion_notification).setContentTitle("Car Companion")
+            .setContentText(description)
+            .setContentIntent(activity).setOngoing(true).setSilent(true)
+            .addAction(0, "Stop", stop).build()
     }
 
     private fun enterForeground(): Boolean {
-        val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stop = PendingIntent.getService(this, 1, Intent(this, CompanionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_companion_notification).setContentTitle("Car Companion")
-            .setContentText("Driving display active · tap to manage connection")
-            .setContentIntent(activity).setOngoing(true).setSilent(true)
-            .addAction(0, "Stop", stop).build()
         val hasLocation = locationEnabled && granted(Manifest.permission.ACCESS_FINE_LOCATION)
         val hasBluetooth = Build.VERSION.SDK_INT < 31 || granted(Manifest.permission.BLUETOOTH_CONNECT)
         val type = (if (hasBluetooth) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
@@ -106,7 +148,7 @@ class CompanionService : Service() {
             stopSelf(); return false
         }
         return try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), type)
             true
         } catch (failure: RuntimeException) {
             AppStore.log("Start from the visible app after granting permissions: ${failure.javaClass.simpleName}")
@@ -123,17 +165,14 @@ class CompanionService : Service() {
         val page = runCatching { DisplayPage.valueOf(prefs.getString("last_page", "DRIVING")!!) }.getOrDefault(DisplayPage.DRIVING)
         AppStore.selectPage(page)
         applySettings()
-        if (locationEnabled) gps.start()
-        else AppStore.diagnostic { it.copy(gpsStatus = "Open the app to resume GPS after background reconnection") }
         media.start()
-        prefs.getString("device_address", null)?.let { address ->
-            runCatching { ble.connect(address) }.onFailure { AppStore.log("Saved device unavailable") }
-        }
         scope.launch {
             ble.connection.collect { info ->
                 AppStore.update { it.copy(connection = ConnectionState(info.connected, info.status, info.mtu, info.firmwareVersion)) }
                 // Disconnect also cancels the old transfer before a replacement GATT session starts.
                 artworkSender.offer(if (info.connected) AppStore.artwork.value else null)
+                refreshGps()
+                runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification()) }
             }
         }
         scope.launch {
@@ -204,6 +243,8 @@ class CompanionService : Service() {
     }
 
     private fun applySettings() {
+        ble.setAutoReconnect(AutoReconnectSettings.isEnabled(this))
+        DevicePresenceObserver.refresh(this)
         ble.setBrightness(prefs.getInt("brightness", 70))
         media.settingsChanged()
         lookupJob?.cancel()
@@ -217,6 +258,19 @@ class CompanionService : Service() {
             else -> UnknownSpeedLimitProvider()
         }
         AppStore.diagnostic { it.copy(speedLimitStatus = provider.name) }
+    }
+
+    private fun refreshGps() {
+        if (!initialized) return
+        AppStore.diagnostic { it.copy(locationNeedsForegroundStart = !locationEnabled) }
+        if (demoEnabled) return
+        if (locationEnabled && ble.connection.value.connected) gps.start()
+        else {
+            gps.stop()
+            AppStore.update { it.copy(driving = DrivingState()) }
+            AppStore.diagnostic { it.copy(gpsStatus = if (locationEnabled) "Display unavailable · GPS paused"
+                else "Tap Resume GPS in the app after background reconnection") }
+        }
     }
 
     private fun setDemo(enabled: Boolean) {
@@ -245,7 +299,7 @@ class CompanionService : Service() {
             AppStore.artwork(null)
             AppStore.navigation(MapsNotificationListener.updates.value.fresh(SystemClock.elapsedRealtime()))
             AppStore.update { it.copy(driving = DrivingState(), music = MusicState()) }
-            if (locationEnabled) gps.start()
+            refreshGps()
             media.start()
         }
         applySettings()
@@ -273,7 +327,8 @@ class CompanionService : Service() {
         AppStore.update { it.copy(connection = ConnectionState(), driving = DrivingState(), music = MusicState(), demo = false) }
         AppStore.artwork(null)
         AppStore.navigation(NavigationState())
-        AppStore.diagnostic { it.copy(serviceRunning = false, gpsStatus = "Location service stopped", mediaStatus = "Media monitoring stopped") }
+        AppStore.diagnostic { it.copy(serviceRunning = false, locationNeedsForegroundStart = false,
+            gpsStatus = "Location service stopped", mediaStatus = "Media monitoring stopped") }
         super.onDestroy()
     }
 
@@ -290,9 +345,27 @@ class CompanionService : Service() {
         fun start(context: Context, address: String? = null) = send(context, Intent(context, CompanionService::class.java).putExtra(EXTRA_ADDRESS, address))
         fun resumeBle(context: Context, address: String) = send(context,
             Intent(context, CompanionService::class.java).setAction(ACTION_RESUME_BLE).putExtra(EXTRA_ADDRESS, address))
+        /** Called only while the activity is visible; repairs observation after an app update. */
+        fun restoreWhenVisible(context: Context) {
+            DevicePresenceObserver.refresh(context)
+            if (!AutoReconnectSettings.isArmed(context)) return
+            if (Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(context,
+                    Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return
+            val diagnostics = AppStore.diagnostics.value
+            if (!diagnostics.serviceRunning || diagnostics.locationNeedsForegroundStart) start(context)
+        }
         fun stop(context: Context) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("service_enabled", false).apply()
+            AutoReconnectSettings.disarm(context)
+            DevicePresenceObserver.refresh(context)
             context.stopService(Intent(context, CompanionService::class.java))
+        }
+        fun setAutoReconnect(context: Context, enabled: Boolean) {
+            AutoReconnectSettings.setEnabled(context, enabled)
+            if (enabled) start(context)
+            else {
+                DevicePresenceObserver.refresh(context)
+                updateSettings(context)
+            }
         }
         fun updateSettings(context: Context) {
             if (AppStore.diagnostics.value.serviceRunning) send(context, Intent(context, CompanionService::class.java).setAction(ACTION_SETTINGS))

@@ -27,9 +27,11 @@ Some Android versions require Location Services enabled for the system companion
 
 ## While driving
 
-The foreground service keeps working when this activity closes. BLE reconnects with capped exponential backoff. Android Companion Device Manager presence observation can wake a previously enabled companion service when the display returns. The Android 16 presence API is used on Android 16; the older supported API is used on Android 12–15.
+The foreground service keeps working when this activity closes. **Setup → Automatic reconnect** is enabled by the first explicit Start and preserves the existing enabled service on upgrade. Leave it on for an ignition-powered display. The display starts advertising on each cold boot; the phone reconnects using its saved association and bond without another pairing step. BLE retries use capped exponential backoff, and a selected-device presence event or Bluetooth being turned back on interrupts that wait.
 
-A cold presence wake starts a `connectedDevice` foreground service only. Android's while-in-use location restrictions mean you must open the app and tap **Start companion** to restore GPS after the service process was stopped. The app does not claim unrestricted background GPS and does not request background-location permission. Force stop, battery restrictions, Bluetooth-off, permission revocation, OEM policies, or a killed service can require a visible restart. A deliberate **Stop companion** disables automatic presence restart.
+Android Companion Device Manager presence observation can wake a previously enabled companion service when the display returns. The app repairs presence registration from the saved association when started, uses association IDs on Android 16+, and ignores events from other associated devices. Android 12–15 use the older supported presence API. On Android 8–11, automatic retry requires the foreground service to remain running because the presence-wake API is unavailable. Turning automatic reconnect off keeps an existing connection but stops recovery after it drops.
+
+A cold presence wake or Android sticky-service restart starts a `connectedDevice` foreground service only. The existing live foreground service pauses GPS when the display is absent and resumes it automatically on reconnection. After its process dies, opening the already-enabled app restores permitted GPS from the visible activity; Overview also provides **Resume GPS** when a visible restart is needed. The app does not request background-location permission. Force stop, battery restrictions, permission revocation, or OEM policies can still require a visible restart. A deliberate **Stop companion** disarms both sticky recovery and presence restart until you start it again.
 
 The app restores metadata on each successful connection. It reads the firmware's cached artwork CRC and resends the JPEG only when needed. Android may negotiate MTU 517 even though the client requests 247; the actual result is used, with an ATT value cap of 512 bytes and a 12-byte frame header. MTU 23 is supported. Transfers use one acknowledged write at a time, bounded three-attempt artwork transactions, and no assumed throughput.
 
@@ -49,6 +51,8 @@ Speed-limit default is **Unavailable**. Setup also supports a demo-only mock and
 
 Overview renders the same `DisplayState` consumed by the BLE encoder. Swipe or tap a page name to preview the three views. The physical display's own gestures select its page independently. Navigation route start/end updates both models using the documented page policy. Preview uses an unambiguous dash for missing GPS and speed limits, and reports data age/confidence in Diagnostics.
 
+Music metadata uses one line per field, with an ellipsis for long names. Embedded line breaks are flattened for presentation. The physical display also constrains label heights so titles, artists and albums cannot overlap each other or the controls. The launcher uses a native adaptive vector instrument icon with a black background, white outline, blue needle and a monochrome layer for themed launchers.
+
 **Explore demo mode** starts a visibly labeled synthetic speed, music and route sequence. Android also draws a deterministic demo album cover with color patches and passes it through the real JPEG encoder, CRC calculation and BLE artwork transfer. This exercises the image pipeline without a Spotify session. When connected, demo mode is explicitly signaled to the display. Turn it off before live use. Firmware also has an independent simulation build option, described in the hardware setup guide.
 
 ## Android Auto coexistence
@@ -61,3 +65,6 @@ Connect the phone to the Alpine head unit normally, either wired or wirelessly, 
 - [Bluetooth GATT client APIs, MTU and write callbacks](https://developer.android.com/reference/android/bluetooth/BluetoothGatt)
 - [Android Gradle Plugin 9.0 compatibility and built-in Kotlin](https://developer.android.com/build/releases/agp-9-0-0-release-notes)
 - [Compose BOM dependency alignment](https://developer.android.com/develop/ui/compose/bom)
+- [Adaptive vector icons and monochrome layers](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive)
+- [Android sticky service restart behavior](https://developer.android.com/reference/android/app/Service#START_STICKY)
+- [Foreground service background-start and location restrictions](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)

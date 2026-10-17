@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.carcompanion.app.BuildConfig
 import com.carcompanion.app.model.*
+import com.carcompanion.app.service.AutoReconnectSettings
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,7 +55,7 @@ private val Green = Color(0xff87c99d)
 fun CarCompanionApp(
     onPair: () -> Unit, onStart: () -> Unit, onStop: () -> Unit,
     onNotificationAccess: () -> Unit, onPermissions: () -> Unit,
-    onSettingsChanged: () -> Unit, onDemo: (Boolean) -> Unit,
+    onSettingsChanged: () -> Unit, onDemo: (Boolean) -> Unit, onAutoReconnect: (Boolean) -> Unit,
 ) {
     val state by AppStore.state.collectAsStateWithLifecycle()
     val diagnostics by AppStore.diagnostics.collectAsStateWithLifecycle()
@@ -85,7 +86,7 @@ fun CarCompanionApp(
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         when (active) {
                             0 -> Overview(state, diagnostics, artwork, onPair, onStart, onStop, onDemo)
-                            1 -> Setup(state, diagnostics, onPair, onPermissions, onNotificationAccess, onSettingsChanged)
+                            1 -> Setup(state, diagnostics, onPair, onPermissions, onNotificationAccess, onSettingsChanged, onAutoReconnect)
                             else -> DiagnosticsView(state, diagnostics)
                         }
                         Text("CAR COMPANION  /  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .6f), fontSize = 9.sp, letterSpacing = 2.sp,
@@ -130,7 +131,13 @@ private fun Overview(state: DisplayState, diagnostics: Diagnostics, artwork: Art
             Text("↗", color = Blue, fontSize = 27.sp)
         }
         Spacer(Modifier.height(18.dp))
-        if (diagnostics.serviceRunning) OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Stop companion") }
+        if (diagnostics.serviceRunning) {
+            if (diagnostics.locationNeedsForegroundStart) {
+                Text("The display can reconnect automatically. Resume GPS here to send your current speed.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+                Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Resume GPS") }
+            }
+            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Stop companion") }
+        }
         else Button(onClick = { if (preferences.getString("device_address", null) == null) onPair() else onStart() }, modifier = Modifier.fillMaxWidth()) {
             Text(if (preferences.getString("device_address", null) == null) "Connect a display" else "Start companion")
         }
@@ -201,9 +208,9 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
                         val artSize = (137 * scale).dp
                         if (bitmap != null && state.music.artworkId == artwork?.contentId) Image(bitmap, "Album artwork", Modifier.size(artSize).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                         else Box(Modifier.size(artSize).background(Panel, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Text("♫", fontSize = 52.sp, color = Green) }
-                        Text(state.music.title.ifBlank { "Nothing playing" }, fontSize = (17 * scale).sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
-                        Text(state.music.artist.ifBlank { "Play something on Spotify" }, color = Muted, fontSize = (12 * scale).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (state.music.album.isNotBlank()) Text(state.music.album, color = Muted, fontSize = (10 * scale).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        MusicRow(state.music.title.ifBlank { "Nothing playing" }, 17 * scale, Color.White, FontWeight.Medium, Modifier.padding(top = (14 * scale).dp))
+                        MusicRow(state.music.artist.ifBlank { "Play something on Spotify" }, 12 * scale, Muted)
+                        if (state.music.album.isNotBlank()) MusicRow(state.music.album, 10 * scale, Muted)
                         Spacer(Modifier.weight(1f))
                         LinearProgressIndicator(progress = { if (state.music.durationMs > 0) (state.music.positionMs.toFloat() / state.music.durationMs).coerceIn(0f, 1f) else 0f }, modifier = Modifier.fillMaxWidth().height(2.dp), color = Green, trackColor = Line)
                         Text(if (state.music.playing) "PLAYING" else "PAUSED", color = Green, fontSize = 9.sp, letterSpacing = 2.sp, modifier = Modifier.padding(top = 8.dp))
@@ -211,11 +218,21 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
                 }
             }
             if (state.page == DisplayPage.DRIVING) {
-                Text(state.music.title.ifBlank { "Spotify · not playing" }, color = if (state.music.playing) Green else Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = (12 * scale).sp)
-                if (state.music.artist.isNotBlank()) Text(state.music.artist, color = Muted, fontSize = (10 * scale).sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+                MusicRow(state.music.title.ifBlank { "Spotify · not playing" }, 12 * scale, if (state.music.playing) Green else Muted)
+                if (state.music.artist.isNotBlank()) MusicRow(state.music.artist, 10 * scale, Muted, modifier = Modifier.padding(top = (3 * scale).dp))
             }
         }
     }
+}
+
+private val metadataLineBreaks = Regex("[\\r\\n\\t\\u0085\\u2028\\u2029]+")
+
+@Composable
+private fun MusicRow(text: String, size: Float, color: Color, weight: FontWeight = FontWeight.Normal, modifier: Modifier = Modifier) {
+    val singleLine = remember(text) { text.replace(metadataLineBreaks, " ").trim() }
+    Text(singleLine, modifier.fillMaxWidth(), color = color, fontSize = size.sp, lineHeight = (size * 1.3f).sp,
+        fontWeight = weight, minLines = 1, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
 }
 
 @Composable private fun SpeedLimit(limit: Int?) {
@@ -227,7 +244,7 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
 
 @Composable
 private fun Setup(state: DisplayState, diagnostics: Diagnostics, onPair: () -> Unit, onPermissions: () -> Unit,
-                  onNotificationAccess: () -> Unit, changed: () -> Unit) {
+                  onNotificationAccess: () -> Unit, changed: () -> Unit, onAutoReconnect: (Boolean) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("car_companion", Context.MODE_PRIVATE) }
     var brightness by remember { mutableFloatStateOf(prefs.getInt("brightness", 70).toFloat()) }
@@ -235,6 +252,14 @@ private fun Setup(state: DisplayState, diagnostics: Diagnostics, onPair: () -> U
     var provider by remember { mutableStateOf(prefs.getString("speed_limit_provider", "unknown") ?: "unknown") }
     var endpoint by remember { mutableStateOf(prefs.getString("speed_limit_endpoint", "") ?: "") }
     var token by remember { mutableStateOf(prefs.getString("speed_limit_token", "") ?: "") }
+    var autoReconnect by remember { mutableStateOf(AutoReconnectSettings.isEnabled(context)) }
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "auto_reconnect" || key == "service_enabled") autoReconnect = AutoReconnectSettings.isEnabled(context)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     Label("01  /  CONNECT YOUR DISPLAY")
     CardBlock {
         Text("Waveshare companion", fontSize = 18.sp)
@@ -243,6 +268,15 @@ private fun Setup(state: DisplayState, diagnostics: Diagnostics, onPair: () -> U
         Spacer(Modifier.height(12.dp))
         Button(onClick = onPair) { Text("Find nearby display") }
         Text("Power on the display, then select it in the Android device chooser and confirm Bluetooth pairing.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
+        HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 18.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 16.dp)) {
+                Text("Automatic reconnect", fontSize = 14.sp)
+                Text("Connect when the car display powers on", color = Muted, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+            Switch(checked = autoReconnect, onCheckedChange = { enabled -> autoReconnect = enabled; onAutoReconnect(enabled) })
+        }
+        Text("Start companion once to enable it. Stop companion pauses automatic connections until you start it again.", color = Muted, fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
     }
     Label("02  /  PHONE INTEGRATIONS")
     CardBlock {

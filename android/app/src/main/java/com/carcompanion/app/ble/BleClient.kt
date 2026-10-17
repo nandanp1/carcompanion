@@ -40,6 +40,8 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
     private val mutableConnection = MutableStateFlow(ConnectionInfo())
     val connection: StateFlow<ConnectionInfo> = mutableConnection
     private val lifecycle = ConnectionLifecycle(scope)
+    private val retryWake = RetryWakeSignal()
+    @Volatile private var automaticReconnect = true
     @Volatile private var gatt: BluetoothGatt? = null
     @Volatile private var wantedAddress: String? = null
     private var connectedSignal = CompletableDeferred<Unit>()
@@ -67,6 +69,35 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
     private var lastDrivingSentMs = Long.MIN_VALUE
     private var lastClockMinute = Long.MIN_VALUE
     private var brightness = 70
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothAdapter.ACTION_STATE_CHANGED || wantedAddress == null) return
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_ON -> {
+                    logConnection("Bluetooth enabled · resuming display connection")
+                    retryWake.wake()
+                }
+                BluetoothAdapter.STATE_OFF, BluetoothAdapter.STATE_TURNING_OFF -> {
+                    val failure = IllegalStateException("Bluetooth is off")
+                    connectedSignal.completeExceptionally(failure)
+                    disconnectedSignal.complete(Unit)
+                    operation?.result?.completeExceptionally(failure)
+                    mutableConnection.value = mutableConnection.value.copy(connected = false, status = "Bluetooth is off · waiting")
+                    retryWake.wake()
+                }
+            }
+        }
+    }
+
+    init {
+        ContextCompat.registerReceiver(context, bluetoothReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
+    }
+
+    fun setAutoReconnect(enabled: Boolean) {
+        automaticReconnect = enabled
+        if (!enabled && !connection.value.connected) disconnect()
+        retryWake.wake()
+    }
 
     fun connect(rawAddress: String) {
         val address = BluetoothAddress.canonicalize(rawAddress)
@@ -75,12 +106,23 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         if (preferences.getString("device_address", null) != address) {
             preferences.edit().putString("device_address", address).apply()
         }
-        if (wantedAddress == address && lifecycle.isActive) return
+        if (wantedAddress == address && lifecycle.isActive) {
+            if (!connection.value.connected) retryWake.wake()
+            return
+        }
         wantedAddress = address
+        retryWake.clear()
         lifecycle.replace {
             var attempt = 0
             while (isActive && wantedAddress == address) {
                 try {
+                    val manager = context.getSystemService(BluetoothManager::class.java)
+                    val adapter = manager?.adapter ?: error("Bluetooth is unavailable")
+                    while (!adapter.isEnabled) {
+                        mutableConnection.value = ConnectionInfo(status = "Bluetooth is off · waiting")
+                        retryWake.await(30_000)
+                        ensureActive()
+                    }
                     mutableConnection.value = ConnectionInfo(status = "Connecting…")
                     mtu = 23
                     cachedCrc = 0
@@ -93,9 +135,6 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
                     lastClockMinute = Long.MIN_VALUE
                     connectedSignal = CompletableDeferred()
                     disconnectedSignal = CompletableDeferred()
-                    val manager = context.getSystemService(BluetoothManager::class.java)
-                    val adapter = manager?.adapter ?: error("Bluetooth is unavailable")
-                    check(adapter.isEnabled) { "Turn on Bluetooth" }
                     val device = adapter.getRemoteDevice(address)
                     logConnection("BLE connecting · attempt ${attempt + 1}")
                     val active = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -139,11 +178,12 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
                     runCatching { previous?.disconnect() }
                     runCatching { previous?.close() }
                 }
+                if (!automaticReconnect) break
                 if (wantedAddress == address && isActive) {
                     val delayMs = Protocol.retryDelay(attempt++) + Random.nextLong(0, 300)
                     mutableConnection.value = mutableConnection.value.copy(connected = false, status = "Reconnecting in ${delayMs / 1000}s")
                     logConnection("BLE reconnect scheduled · ${delayMs}ms")
-                    delay(delayMs)
+                    retryWake.await(delayMs)
                 }
             }
         }
@@ -156,7 +196,11 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         runCatching { gatt?.disconnect() }
         mutableConnection.value = mutableConnection.value.copy(connected = false, status = "Disconnected")
     }
-    fun close() { disconnect(); scope.cancel() }
+    fun close() {
+        disconnect()
+        runCatching { context.unregisterReceiver(bluetoothReceiver) }
+        scope.cancel()
+    }
 
     private fun logConnection(message: String) {
         val bounded = message.take(240)

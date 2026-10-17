@@ -8,6 +8,7 @@ public:
     void update(const DisplayState&,uint64_t now);
 private:
     lv_obj_t *speed_=nullptr,*limit_=nullptr,*clock_=nullptr,*status_=nullptr,*music_=nullptr;
+    std::string musicText_="Connect your phone";
 };
 class NavigationScreen {
 public:
@@ -29,4 +30,5 @@ private:
     std::function<void(uint8_t)> command_;
     uint32_t loggedExpectedCrc_=0,loggedDecodedCrc_=0;
     bool loggedPresence_=false,loggedDecoded_=false,visibilityLogged_=false;
+    std::string titleText_="No music",artistText_="Connect your phone",albumText_;
 };

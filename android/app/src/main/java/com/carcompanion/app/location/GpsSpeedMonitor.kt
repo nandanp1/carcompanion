@@ -31,7 +31,7 @@ class GpsSpeedMonitor(private val context: Context) {
             result.lastLocation?.let(::onLocation)
         }
         override fun onLocationAvailability(availability: LocationAvailability) {
-            if (!availability.isLocationAvailable) AppStore.diagnostic { it.copy(gpsStatus = "Waiting for a fresh location fix") }
+            if (running && !availability.isLocationAvailable) AppStore.diagnostic { it.copy(gpsStatus = "Waiting for a fresh location fix") }
         }
     }
 
@@ -63,6 +63,8 @@ class GpsSpeedMonitor(private val context: Context) {
 
     @Suppress("DEPRECATION")
     private fun onLocation(location: Location) {
+        // Fused Location can already have posted a callback when stop() removes its subscription.
+        if (!running) return
         val mock = if (Build.VERSION.SDK_INT >= 31) location.isMock else location.isFromMockProvider
         val observed = location.elapsedRealtimeNanos / 1_000_000L
         if (observed < (current.value?.observedElapsedMs ?: 0)) return

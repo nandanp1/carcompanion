@@ -25,6 +25,27 @@ lv_obj_t* label(lv_obj_t* parent,const char* text,int x,int y,int width,const lv
     lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0); lv_label_set_long_mode(o,LV_LABEL_LONG_DOT); return o;
 }
 void set(lv_obj_t* label,const std::string& text) { if(text!=lv_label_get_text(label)) lv_label_set_text(label,text.c_str()); }
+lv_obj_t* singleLineLabel(lv_obj_t* parent,const char* text,int x,int y,int width,const lv_font_t* font,uint32_t color=White) {
+    auto* o=label(parent,text,x,y,width,font,color);
+    // LONG_DOT needs a constrained height: content-sized labels still wrap.
+    lv_obj_set_height(o,lv_font_get_line_height(font));
+    lv_obj_set_style_text_line_space(o,0,0);
+    return o;
+}
+void setMetadata(lv_obj_t* label,const std::string& text,std::string& original) {
+    // LVGL's dotted mode modifies the displayed string. Compare against the
+    // original metadata so truncation does not invalidate the label every tick.
+    if(original==text) return;
+    original=text;
+    std::string line; line.reserve(text.size());
+    for(char c:text) {
+        if(c=='\r' || c=='\n' || c=='\t' || c==' ') {
+            if(!line.empty() && line.back()!=' ') line.push_back(' ');
+        } else line.push_back(c);
+    }
+    if(!line.empty() && line.back()==' ') line.pop_back();
+    lv_label_set_text(label,line.c_str());
+}
 std::string speed(const DisplayState& s,uint64_t now) {
     if(!s.speedAvailable(now)) return "—";
     char value[8]; snprintf(value,sizeof(value),"%.0f",s.speedMph); return value;
@@ -41,14 +62,14 @@ lv_obj_t* DrivingScreen::create() {
     label(p,"MPH",190,244,100,&lv_font_montserrat_20,Grey);
     limit_=label(p,"LIMIT  —",140,285,200,&lv_font_montserrat_20);
     status_=label(p,"PHONE DISCONNECTED",90,331,300,&lv_font_montserrat_16,Grey);
-    music_=label(p,"Connect your phone",65,385,350,&lv_font_montserrat_16,Green);
+    music_=singleLineLabel(p,"Connect your phone",65,385,350,&lv_font_montserrat_16,Green);
     label(p,"NAV  •  DRIVE  •  MUSIC",90,423,300,&lv_font_montserrat_16,Grey);
     return p;
 }
 void DrivingScreen::update(const DisplayState& s,uint64_t now) {
     set(speed_,speed(s,now)); set(limit_,limit(s,now)); set(clock_,s.clock);
     set(status_,s.demo?"DEMO • SIMULATED DATA":!s.connected?"PHONE DISCONNECTED":!s.speedAvailable(now)?"GPS UNAVAILABLE":"BLUETOOTH CONNECTED");
-    set(music_,s.title+(s.artist.empty()?"":"  /  "+s.artist));
+    setMetadata(music_,s.title+(s.artist.empty()?"":"  /  "+s.artist),musicText_);
 }
 lv_obj_t* NavigationScreen::create() {
     auto* p=page(); label(p,"NAVIGATION",120,39,240,&lv_font_montserrat_16,Blue);
@@ -107,9 +128,9 @@ lv_obj_t* MusicScreen::create(std::function<void(uint8_t)> command) {
     command_=command; auto* p=page(); label(p,"SPOTIFY",130,25,220,&lv_font_montserrat_16,Green);
     placeholder_=label(p,LV_SYMBOL_AUDIO,120,116,240,&lv_font_montserrat_48,Grey);
     art_=lv_image_create(p); lv_obj_set_pos(art_,120,56); lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN);
-    title_=label(p,"No music",55,310,370,&lv_font_montserrat_24);
-    artist_=label(p,"Connect your phone",55,345,370,&lv_font_montserrat_20,Grey);
-    album_=label(p,"",60,374,360,&lv_font_montserrat_16,Grey);
+    title_=singleLineLabel(p,"No music",55,310,370,&lv_font_montserrat_24);
+    artist_=singleLineLabel(p,"Connect your phone",55,345,370,&lv_font_montserrat_20,Grey);
+    album_=singleLineLabel(p,"",60,374,360,&lv_font_montserrat_16,Grey);
     progress_=lv_bar_create(p); lv_obj_set_pos(progress_,85,405); lv_obj_set_size(progress_,310,3);
     lv_obj_set_style_bg_color(progress_,lv_color_hex(0x262A2D),0);
     lv_obj_set_style_bg_color(progress_,lv_color_hex(Green),LV_PART_INDICATOR); lv_bar_set_range(progress_,0,1000);
@@ -137,7 +158,8 @@ void MusicScreen::artwork(const lv_image_dsc_t* image) {
     else { lv_image_set_src(art_,nullptr); lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN); }
 }
 void MusicScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,bool decodedValid) {
-    set(title_,s.title); set(artist_,s.artist); set(album_,s.demo?"DEMO • SIMULATED DATA":s.album);
+    setMetadata(title_,s.title,titleText_); setMetadata(artist_,s.artist,artistText_);
+    setMetadata(album_,s.demo?"DEMO • SIMULATED DATA":s.album,albumText_);
     set(play_,s.playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
     const bool show=decodedValid && s.artworkPresent && s.artworkId==cachedCrc;
     if(!visibilityLogged_ || loggedPresence_!=s.artworkPresent || loggedDecoded_!=decodedValid ||

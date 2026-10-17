@@ -80,6 +80,7 @@ data class NotificationDiagnostic(
 
 data class Diagnostics(
     val serviceRunning: Boolean = false,
+    val locationNeedsForegroundStart: Boolean = false,
     val notificationAccess: Boolean = false,
     val mediaStatus: String = "Enable notification access to read Spotify",
     val navigationStatus: String = "Waiting for Google Maps notifications",

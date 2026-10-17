@@ -10,12 +10,14 @@ import android.companion.*
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import androidx.annotation.RequiresApi
 import com.carcompanion.app.model.AppStore
+import com.carcompanion.app.service.AutoReconnectSettings
 import com.carcompanion.app.service.CompanionService
 
 /** The system chooser performs discovery; this app never scans continually. */
@@ -25,6 +27,10 @@ class DeviceAssociation(private val activity: Activity, private val launch: (Int
 
     fun associate() {
         delivered = null
+        if (!activity.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
+            AppStore.log("System companion-device association is unavailable on this phone")
+            return
+        }
         val filter = BluetoothLeDeviceFilter.Builder()
             .setScanFilter(ScanFilter.Builder().setServiceUuid(ParcelUuid(Protocol.SERVICE)).build()).build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(false).build()
@@ -60,14 +66,16 @@ class DeviceAssociation(private val activity: Activity, private val launch: (Int
             AppStore.log("Association returned an invalid Bluetooth address")
             return
         }
+        val prefs = activity.getSharedPreferences("car_companion", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("device_address", address)
+            if (associationId != null) putInt(DevicePresenceObserver.ASSOCIATION_ID_KEY, associationId)
+            else if (!PresenceSelection.sameAddress(prefs.getString("device_address", null), address))
+                remove(DevicePresenceObserver.ASSOCIATION_ID_KEY)
+        }.apply()
+        DevicePresenceObserver.refresh(activity)
         if (delivered == address) return
         delivered = address
-        activity.getSharedPreferences("car_companion", Context.MODE_PRIVATE).edit().putString("device_address", address).apply()
-        try {
-            if (Build.VERSION.SDK_INT >= 36 && associationId != null) {
-                manager.startObservingDevicePresence(ObservingDevicePresenceRequest.Builder().setAssociationId(associationId).build())
-            } else if (Build.VERSION.SDK_INT >= 31) manager.startObservingDevicePresence(address)
-        } catch (error: Exception) { AppStore.log("Presence observation unavailable: ${error.message}") }
         selected(address)
     }
 }
@@ -75,17 +83,31 @@ class DeviceAssociation(private val activity: Activity, private val launch: (Int
 /** Presence restores BLE only. GPS is started from a visible user action under Android rules. */
 @RequiresApi(31)
 class DisplayPresenceService : CompanionDeviceService() {
-    override fun onDeviceAppeared(address: String) = resume(address)
+    override fun onDeviceAppeared(address: String) {
+        if (DevicePresenceObserver.matches(this, address)) resume()
+    }
     override fun onDeviceAppeared(associationInfo: AssociationInfo) {
-        if (Build.VERSION.SDK_INT >= 33) associationInfo.deviceMacAddress?.toString()?.let(::resume)
+        if (Build.VERSION.SDK_INT >= 33 && DevicePresenceObserver.matches(this, associationInfo.id)) resume()
+    }
+    override fun onDeviceDisappeared(address: String) {
+        if (DevicePresenceObserver.matches(this, address)) disappeared()
+    }
+    override fun onDeviceDisappeared(associationInfo: AssociationInfo) {
+        if (Build.VERSION.SDK_INT >= 33 && DevicePresenceObserver.matches(this, associationInfo.id)) disappeared()
     }
     override fun onDevicePresenceEvent(event: DevicePresenceEvent) {
-        if (Build.VERSION.SDK_INT >= 36 && event.event in listOf(DevicePresenceEvent.EVENT_BLE_APPEARED, DevicePresenceEvent.EVENT_BT_CONNECTED)) {
-            getSharedPreferences("car_companion", MODE_PRIVATE).getString("device_address", null)?.let(::resume)
+        if (Build.VERSION.SDK_INT < 36 || !DevicePresenceObserver.matches(this, event.associationId)) return
+        when (event.event) {
+            DevicePresenceEvent.EVENT_BLE_APPEARED, DevicePresenceEvent.EVENT_BT_CONNECTED -> resume()
+            DevicePresenceEvent.EVENT_BLE_DISAPPEARED, DevicePresenceEvent.EVENT_BT_DISCONNECTED -> disappeared()
         }
     }
-    private fun resume(address: String) {
+    private fun resume() {
         // Respect a deliberate Stop action; association itself is not permission to restart.
-        if (getSharedPreferences("car_companion", MODE_PRIVATE).getBoolean("service_enabled", false)) CompanionService.resumeBle(this, address)
+        if (AutoReconnectSettings.isArmed(this)) AutoReconnectSettings.selectedAddress(this)?.let { CompanionService.resumeBle(this, it) }
+    }
+    private fun disappeared() {
+        // Scan presence and GATT connection are distinct; the live connection owns disconnects.
+        AppStore.log("Selected display left companion presence; automatic reconnection remains enabled")
     }
 }

@@ -51,11 +51,19 @@ class MainActivity : ComponentActivity() {
                 onNotificationAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                 onPermissions = { requestPermissionsThen {} },
                 onSettingsChanged = { CompanionService.updateSettings(this) },
+                onAutoReconnect = { enabled ->
+                    if (enabled) requestPermissionsThen { CompanionService.setAutoReconnect(this, true) }
+                    else CompanionService.setAutoReconnect(this, false)
+                },
                 onDemo = { enabled -> if (enabled) requestPermissionsThen { CompanionService.demo(this, true) } else CompanionService.demo(this, false) },
             )
         }
     }
-    override fun onResume() { super.onResume(); refreshNotificationAccess() }
+    override fun onResume() {
+        super.onResume()
+        refreshNotificationAccess()
+        CompanionService.restoreWhenVisible(this)
+    }
     private fun refreshNotificationAccess() {
         val expected = ComponentName(this, MapsNotificationListener::class.java)
         val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")

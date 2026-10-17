@@ -25,6 +25,16 @@ cd android
 
 Firmware host tests and ESP-IDF commands are in [hardware setup](hardware-setup.md). Unit tests cannot validate DMA alignment, real touch coordinates, BLE radio scheduling, pairing UI, Android process lifetime or vehicle installation.
 
+After an ESP-IDF configure/build has resolved the pinned LVGL component and generated `firmware/build/config/sdkconfig.h`, also run the actual screen layout tests:
+
+```sh
+cmake -S firmware/tests -B .cache/firmware-layout-tests -DCOMPANION_TEST_LVGL=ON
+cmake --build .cache/firmware-layout-tests -j 4
+ctest --test-dir .cache/firmware-layout-tests --output-on-failure
+```
+
+These render the production screens with the production fonts. They check long title/artist/album row bounds, ellipsis, embedded line breaks, artwork visibility/CRC behavior and deferred DMA-style flushing. Repeated unchanged long metadata must produce zero extra flushes. Address/undefined sanitizers are enabled by default; Clang's function-pointer type check is excluded for LVGL's existing generic callback convention, while the other checks remain enabled.
+
 ## Physical acceptance checklist
 
 Perform interactions while parked, then have a passenger observe any driving checks. Record firmware and protocol builds before testing.
@@ -47,6 +57,7 @@ Perform interactions while parked, then have a passenger observe any driving che
 | Disconnect halfway through image | Incomplete data released; successful retransfer after reconnect | Not run |
 | Reconnect with same track | Full state restored; cached artwork not resent | Not run |
 | Rapid track changes | Latest title/art match; no wrong-cover association | Live track callbacks, obsolete-image cancellation and CRC matching exercised; user confirmed faster updates. Longer stress test pending. |
+| Long title/artist/album | One line per field with ellipsis; no overlap with controls | Production LVGL host render passed; fixed firmware installed and verified. Dedicated physical long-name visual check pending. |
 | Spotify art absent | Placeholder, no cover from prior song | Not run |
 | Play/pause/next/previous | Supported session actions occur once each | Not run |
 | Real GPS outdoors | Plausible mph, units correct, confidence/age visible in diagnostics | Not run |
@@ -59,6 +70,8 @@ Perform interactions while parked, then have a passenger observe any driving che
 | Phone locks, app backgrounded | Visible foreground notification; BLE and location continue if permitted | Not run |
 | Revoke notification/BLE/location permission | Graceful diagnostics and unavailable data | Not run |
 | Bluetooth toggle/device power cycle | Capped reconnect backoff, no overlapping GATT operations | Not run |
+| Ignition power with battery removed | Locked phone reconnects to a fully cold-booted display, restores state and retransfers art after the RAM cache is lost | User confirmed reconnection/current song after locking the phone and unplugging/replugging the battery-free display. Post-flash boot also restored encrypted BLE and full-size art automatically. |
+| Android service process killed | Enabled automatic recovery restarts BLE only; opening app restores permitted GPS; deliberate Stop stays stopped | Pixel 9 Pro XL process-kill recovery verified: BLE-only foreground service restarted; visible app restored location type. Deliberate Stop covered by regression tests; physical Stop/presence test pending. |
 | Android force-stop and relaunch | Explicit start works; no claim to bypass Android force-stop | Not run |
 | Wired Android Auto + Spotify + Maps | Audio/navigation uninterrupted while display updates | Not run |
 | Wireless Android Auto + Spotify + Maps | Same, record radio/latency behavior for this phone/head unit | Not run |
