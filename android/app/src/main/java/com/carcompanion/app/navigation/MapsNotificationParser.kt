@@ -3,7 +3,7 @@ package com.carcompanion.app.navigation
 import com.carcompanion.app.model.Maneuver
 import com.carcompanion.app.model.NavigationState
 
-/** Public notification text only. Fixtures are synthetic supported formats, not a Maps API contract. */
+/** Public notification text only; observed and synthetic fixtures are not a Maps API contract. */
 data class NavigationNotification(
     val packageName: String,
     val key: String,
@@ -23,16 +23,27 @@ object MapsNotificationParser {
     private val duration = Regex("(?:\\d+\\s*h(?:r|ours?)?\\s*)?\\d+\\s*min(?:utes?)?\\b", RegexOption.IGNORE_CASE)
     private val arrival = Regex("\\b\\d{1,2}:\\d{2}\\s*(?:AM|PM)\\b", RegexOption.IGNORE_CASE)
     private val instruction = Regex("^(?:In\\s+[^,]+,\\s*)?(Turn (?:slight(?:ly)? )?(?:left|right)|Keep (?:left|right)|Continue (?:straight|on)|Head (?:north|south|east|west)(?:east|west)?|Make a U.turn|At the roundabout|Enter the roundabout)(?:\\s+|,|$)", RegexOption.IGNORE_CASE)
+    private val whitespace = Regex("[\\p{Z}\\s]+")
+
+    private fun normalize(value: String) = whitespace.replace(value, " ").trim()
+
+    private fun withoutLeadingDistance(line: String): String {
+        // Observed Maps format: "350\u00a0ft · Keep right to stay on Sample Rd".
+        // Only an entire supported distance may precede the separator, never a guessed prefix.
+        val separator = line.indexOf('·')
+        return if (separator >= 0 && distance.matches(line.substring(0, separator).trim()))
+            line.substring(separator + 1).trim() else line
+    }
 
     fun parse(input: NavigationNotification, nowElapsedMs: Long): NavigationParseResult {
         if (input.packageName != MAPS_PACKAGE) return NavigationParseResult(null, "Ignored package")
-        val lines = listOf(input.title, input.text, input.bigText).flatMap { it.lines() }.map { it.trim() }.filter { it.isNotEmpty() }
-        val explicit = lines.firstOrNull { instruction.containsMatchIn(it) }
+        val lines = listOf(input.title, input.text, input.bigText).flatMap { it.lines() }.map(::normalize).filter { it.isNotEmpty() }
+        val explicit = lines.map(::withoutLeadingDistance).firstOrNull { instruction.containsMatchIn(it) }
         val distanceText = lines.firstNotNullOfOrNull { distance.find(it)?.value }.orEmpty()
         val categoryNavigation = input.category == "navigation"
         val evidence = input.ongoing && (categoryNavigation || (explicit != null && distanceText.isNotEmpty()))
         if (!evidence) return NavigationParseResult(null, "No reliable active-route evidence in public notification fields")
-        val eta = listOf(input.subText, input.text, input.bigText).firstNotNullOfOrNull {
+        val eta = listOf(input.subText, input.text, input.bigText).map(::normalize).firstNotNullOfOrNull {
             duration.find(it)?.value ?: arrival.find(it)?.value
         }.orEmpty()
         if (explicit == null) return NavigationParseResult(

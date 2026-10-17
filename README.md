@@ -14,7 +14,7 @@ Local deliverables are packaged in `artifacts/car-companion-0.1.0.zip`: source, 
 | Display | Three LVGL 9 screens, black AMOLED styling, large mph, source freshness, swipe thresholds, animated page changes, navigation takeover/return, persistent brightness/page |
 | Android | Kotlin/Compose, system companion-device association, encrypted BLE, foreground service, permission onboarding, preview, settings and bounded diagnostics |
 | Driving | Fused Location speed in mph; stale/poor fixes render `—`; separate unknown/mock/HTTPS road-matched speed-limit providers |
-| Spotify | Active MediaSession metadata, artwork extraction, 240×240 baseline JPEG with bounded fallback, CRC32 transfer/cache, optional transport controls |
+| Spotify | Active MediaSession metadata, full artwork on Music and compact covers on Driving/Navigation, 240×240 baseline JPEG with bounded fallback, CRC32 transfer/cache, optional transport controls |
 | Navigation | Experimental conservative Google Maps notification parser, field inspector, mock route provider and structured integration interface |
 | Transport | Six custom GATT characteristics, MTU-aware framing, sequenced byte offsets, duplicates/retries, one-write flow control, reconnect and state restoration |
 | Memory | No full framebuffer or PSRAM assumption; two 10-line DMA stripes, compressed artwork capped at 32 KiB, one decoded image capped at 240×240 RGB565 |
@@ -80,7 +80,7 @@ Start on a USB-powered bench. In `idf.py menuconfig`, select Car Companion's sim
 3. Enable **Car Companion: Maps & media** in Android's Notification access settings.
 4. Start the companion while its activity is visible. Keep the user-visible service running for BLE/GPS; the activity may close.
 5. Start Spotify and inspect Maps diagnostics during a route. Leave speed-limit provider on **Unavailable** unless you have a valid road-matched source.
-6. Swipe left from Driving for Music, right for Navigation. A new route may open Navigation; manual swipes still work. Ending the route restores the selection from before the route.
+6. Swipe left from Driving for Music, right for Navigation. A detected active route automatically opens Navigation; manual swipes still work. Ending the route restores the selection from before the route. Driving and Navigation retain a small current album cover beside the song and artist.
 
 A cold background device-presence wake can restore BLE, but GPS after a stopped process requires a visible app start under Android's location rules. The project does not bypass force-stop, permission restrictions or OEM battery management.
 

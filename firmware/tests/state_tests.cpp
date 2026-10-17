@@ -48,6 +48,19 @@ int main() {
     pages.select(Page::Driving); pages.navigation(true); assert(pages.visible()==Page::Driving);
     pages.navigation(false); assert(pages.visible()==Page::Music);
     pages.select(Page::Driving); assert(pages.swipe(90,0,200)); assert(pages.visible()==Page::Navigation);
+    // Route presence, not repeated/unknown instruction content, controls the
+    // one automatic switch. Explicit manual choices survive every active update.
+    PageNavigation routePages(Page::Music);
+    routePages.navigation(true); assert(routePages.visible()==Page::Navigation);
+    assert(routePages.swipe(-90,0,100)); assert(routePages.visible()==Page::Driving);
+    for(unsigned i=0;i<100;++i) { routePages.navigation(true); assert(routePages.visible()==Page::Driving); }
+    routePages.navigation(false); assert(routePages.visible()==Page::Music);
+    routePages.navigation(false); assert(routePages.visible()==Page::Music);
+    // A reconnect without active navigation cannot resurrect the old route;
+    // a freshly confirmed active route can select navigation again.
+    routePages.navigation(false); assert(routePages.visible()==Page::Music);
+    routePages.navigation(true); assert(routePages.visible()==Page::Navigation);
+    routePages.navigation(false); assert(routePages.visible()==Page::Music);
     DisplayState s; assert(!s.speedAvailable(1000)); s.connected=true; s.gpsValid=true;
     s.drivingReceivedMs=1000; s.gpsAgeMs=100; assert(s.speedAvailable(3899)); assert(!s.speedAvailable(3900));
     assert(!s.limitAvailable(1000)); s.speedLimitMph=55; s.limitConfidence=0.79; s.limitAgeMs=0;

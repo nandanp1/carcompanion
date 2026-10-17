@@ -83,7 +83,7 @@ int main() {
     lv_display_set_buffers(display,stripes,stripes+480*10*2,480*10*2,LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display,flush); lv_display_set_flush_wait_cb(display,waitFlush);
     NavigationScreen navigation; DrivingScreen driving; MusicScreen music;
-    navigation.create(); auto* drivingPage=driving.create(); auto* page=music.create([](uint8_t){});
+    auto* navigationPage=navigation.create(); auto* drivingPage=driving.create(); auto* page=music.create([](uint8_t){});
     lv_screen_load(page);
     DisplayState state; state.connected=true; state.title="Artwork render smoke"; state.artist="Production MusicScreen";
     state.album="Pinned LVGL 9.5.0"; state.playing=true; state.durationMs=180000;
@@ -98,7 +98,7 @@ int main() {
     image.data_size=240*240*2; image.data=reinterpret_cast<const uint8_t*>(pixels.data());
     constexpr uint32_t crc=0x33445566;
     state.artworkPresent=true; state.artworkId=crc;
-    music.artwork(&image); music.update(state,now,crc,true); render(display); save("matching-artwork.ppm");
+    setScreenArtwork(driving,navigation,music,&image); music.update(state,now,crc,true); render(display); save("matching-artwork.ppm");
     expectPixel(160,100,0xf800); expectPixel(280,100,0x07e0);
     expectPixel(160,220,0x001f); expectPixel(280,220,0xffff);
     assert(frame[100*480+160]!=placeholder);
@@ -122,27 +122,90 @@ int main() {
     music.update(state,now,crc,true); render(display);
     assert(std::strcmp(lv_label_get_text(title),"Short title")==0);
     assert(std::strcmp(lv_label_get_text(artist),"")==0 && std::strcmp(lv_label_get_text(album),"")==0);
-    state.artworkId=crc+1; music.update(state,now,crc,true); render(display); save("mismatched-artwork.ppm");
-    assert(frame[100*480+160]==placeholder);
-    state.artworkId=0; music.update(state,now,0,true); render(display);
-    expectPixel(160,100,0xf800); // Legitimate CRC zero must still display.
-    music.artwork(nullptr); lv_image_cache_drop(&image);
-    image.header.w=120; image.header.h=120; image.header.stride=240; image.data_size=120*120*2;
-    std::fill(pixels.begin(),pixels.end(),0x07e0);
-    music.artwork(&image); music.update(state,now,0,true); render(display); save("half-scale-artwork.ppm");
-    expectPixel(200,140,0x07e0); expectPixel(160,100,placeholder);
-    music.artwork(nullptr); music.update(state,now,0,false); render(display);
-    expectPixel(200,140,placeholderCenter);
     state.title="A very long driving dashboard song title that continues far beyond the available space";
     state.artist="An unusually long artist name with many featured performers";
-    driving.update(state,now); lv_screen_load(drivingPage); render(display); save("long-driving-metadata.ppm");
-    auto* nowPlaying=labelAt(drivingPage,385);
-    expectSingleLine(nowPlaying,423);
-    assert(std::strstr(lv_label_get_text(nowPlaying),"...")!=nullptr);
-    const unsigned beforeDrivingIdle=flushes;
-    for(int i=0;i<20;++i) { driving.update(state,now); render(display); }
-    assert(flushes==beforeDrivingIdle);
+    state.navigationActive=true; state.maneuver="right"; state.distance="500 ft"; state.eta="ETA 10:45";
+    state.road="A very long upcoming road name through the historic downtown neighborhood and coastal highway";
+    state.navigationStatus="From phone notification";
+    const auto updateAll=[&](uint32_t cached,bool valid) {
+        driving.update(state,now,cached,valid);
+        navigation.update(state,now,cached,valid);
+        music.update(state,now,cached,valid);
+    };
+    const auto thumbnailPixels=[] {
+        expectPixel(114,388,0xf800); expectPixel(144,388,0x07e0);
+        expectPixel(114,418,0x001f); expectPixel(144,418,0xffff);
+    };
+    const auto imageOn=[](lv_obj_t* root) -> lv_obj_t* {
+        for(unsigned i=0;i<lv_obj_get_child_count(root);++i) {
+            auto* child=lv_obj_get_child(root,i);
+            if(lv_obj_check_type(child,&lv_image_class)) return child;
+        }
+        assert(false && "screen artwork widget missing"); return nullptr;
+    };
+    updateAll(crc,true);
+    for(auto* root:{drivingPage,navigationPage}) {
+        lv_screen_load(root); render(display); thumbnailPixels();
+        auto* thumbnail=imageOn(root);
+        assert(lv_image_get_src(thumbnail)==&image); // all widgets share one descriptor/allocation
+        assert(lv_obj_get_width(thumbnail)==52 && lv_obj_get_height(thumbnail)==52);
+        lv_area_t area{}; lv_obj_get_coords(thumbnail,&area);
+        for(int x:{area.x1,area.x2}) for(int y:{area.y1,area.y2})
+            assert((x-240)*(x-240)+(y-240)*(y-240)<240*240);
+        for(int y:{381,406}) {
+            auto* text=labelAt(root,y); expectSingleLine(text,y==381?406:430);
+            assert(lv_obj_get_x(text)==172 && lv_obj_get_width(text)==212);
+            assert(std::strstr(lv_label_get_text(text),"...")!=nullptr);
+        }
+        auto* road=labelAt(navigationPage,250);
+        assert(lv_obj_get_height(road)==54 && lv_obj_get_y(road)+lv_obj_get_height(road)<310);
+        save(root==drivingPage?"driving-thumbnail.ppm":"navigation-thumbnail.ppm");
+        const unsigned before=flushes;
+        for(int i=0;i<20;++i) { updateAll(crc,true); render(display); }
+        assert(flushes==before); // neither thumbnail scaling nor ellipsis causes idle redraws
+    }
+    state.artworkId=crc+1; updateAll(crc,true);
+    for(auto* root:{drivingPage,navigationPage,page}) {
+        lv_screen_load(root); render(display);
+        assert(lv_obj_has_flag(imageOn(root),LV_OBJ_FLAG_HIDDEN));
+        if(root!=page) {
+            assert(lv_obj_get_x(labelAt(root,381))==104 && lv_obj_get_width(labelAt(root,381))==280);
+            assert(frame[418*480+114]!=0x001f);
+        }
+    }
+    assert(frame[100*480+160]==placeholder);
+    state.artworkPresent=false; state.artworkId=crc; updateAll(crc,true);
+    for(auto* root:{drivingPage,navigationPage,page}) assert(lv_obj_has_flag(imageOn(root),LV_OBJ_FLAG_HIDDEN));
+    state.artworkPresent=true; state.artworkId=0; updateAll(0,true);
+    for(auto* root:{drivingPage,navigationPage,page}) {
+        lv_screen_load(root); render(display);
+        if(root==page) expectPixel(160,100,0xf800); else thumbnailPixels();
+    }
+    // The production detach helper must release every LVGL reference before
+    // the decoder can overwrite/free the one shared output allocation.
+    setScreenArtwork(driving,navigation,music,nullptr); lv_image_cache_drop(&image);
+    for(auto* root:{drivingPage,navigationPage,page}) {
+        assert(lv_image_get_src(imageOn(root))==nullptr);
+        assert(lv_obj_has_flag(imageOn(root),LV_OBJ_FLAG_HIDDEN));
+    }
+    std::vector<uint16_t>().swap(pixels); // ASan catches stale reads from any page.
+    image.data=nullptr; image.data_size=0; updateAll(0,false);
+    for(auto* root:{drivingPage,navigationPage,page}) { lv_screen_load(root); render(display); }
+    expectPixel(200,140,placeholderCenter);
+    pixels.resize(120*120,0x07e0);
+    image.header.w=120; image.header.h=120; image.header.stride=240; image.data_size=120*120*2;
+    image.data=reinterpret_cast<const uint8_t*>(pixels.data());
+    setScreenArtwork(driving,navigation,music,&image); updateAll(0,true);
+    for(auto* root:{drivingPage,navigationPage,page}) {
+        lv_screen_load(root); render(display);
+        if(root==page) { expectPixel(200,140,0x07e0); expectPixel(160,100,placeholder); }
+        else { expectPixel(114,388,0x07e0); expectPixel(144,418,0x07e0); }
+    }
+    save("half-scale-artwork.ppm");
+    setScreenArtwork(driving,navigation,music,nullptr); lv_image_cache_drop(&image);
+    updateAll(0,false); render(display);
     lv_mem_monitor_t memory{}; lv_mem_monitor(&memory);
-    std::printf("PASS: single-line metadata, ellipsis, line breaks, empty fields, unchanged-state no redraw, artwork CRC/replacement, %u safe deferred DMA stripes; LVGL used=%zu free=%zu\n",flushes,memory.total_size-memory.free_size,memory.free_size);
+    assert(memory.max_used<48*1024);
+    std::printf("PASS:3-screen shared artwork, thumbnail pixels, circle bounds, detach/free/replacement, CRC guards, metadata/no redraw, %u safe DMA stripes; LVGL used=%zu free=%zu peak=%zu\n",flushes,memory.total_size-memory.free_size,memory.free_size,memory.max_used);
     lv_deinit();
 }

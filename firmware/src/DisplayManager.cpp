@@ -110,14 +110,16 @@ void DisplayManager::refresh() {
     }
     const DisplayState snapshot=state_; xSemaphoreGive(stateMutex_);
     const Page selectedBefore=pages_.selected();
-    pages_.navigation(snapshot.navigationActive);
+    pages_.navigation(snapshot.navigationActive && (snapshot.connected || snapshot.demo));
     if(pages_.selected()!=selectedBefore) settings_->setPage(pages_.selected());
     if(shown_!=pages_.visible()) {
         const auto next=pages_.visible();
         lv_screen_load_anim(screens_[static_cast<int>(next)],static_cast<int>(next)>static_cast<int>(shown_)?LV_SCR_LOAD_ANIM_MOVE_LEFT:LV_SCR_LOAD_ANIM_MOVE_RIGHT,180,0,false);
         shown_=next;
     }
-    driving_.update(snapshot,now); navigation_.update(snapshot,now); music_.update(snapshot,now,cachedCrc_,decodedValid_);
+    driving_.update(snapshot,now,cachedCrc_,decodedValid_);
+    navigation_.update(snapshot,now,cachedCrc_,decodedValid_);
+    music_.update(snapshot,now,cachedCrc_,decodedValid_);
 }
 void DisplayManager::update(const std::function<void(DisplayState&)>& fn) {
     xSemaphoreTake(stateMutex_,portMAX_DELAY); fn(state_); xSemaphoreGive(stateMutex_);
@@ -138,7 +140,11 @@ void DisplayManager::demo(bool enabled) {
 }
 ArtworkBuffer DisplayManager::detachArtwork() {
     ArtworkBuffer detached;
-    xSemaphoreTake(gui_,portMAX_DELAY); music_.artwork(nullptr); cachedCrc_=0; decodedValid_=false;
+    xSemaphoreTake(gui_,portMAX_DELAY);
+    // All three widgets reference the same descriptor. Remove every reference
+    // before the decoder may overwrite or free its one owned pixel buffer.
+    setScreenArtwork(driving_,navigation_,music_,nullptr);
+    cachedCrc_=0; decodedValid_=false;
     if(image_.data) lv_image_cache_drop(&image_);
     image_={}; detached=std::move(artworkBuffer_);
     xSemaphoreGive(gui_);
@@ -151,7 +157,8 @@ void DisplayManager::artwork(ArtworkBuffer&& pixels,uint16_t width,uint16_t heig
     artworkBuffer_=std::move(pixels);
     image_={}; image_.header.magic=LV_IMAGE_HEADER_MAGIC; image_.header.cf=LV_COLOR_FORMAT_RGB565;
     image_.header.w=width; image_.header.h=height; image_.header.stride=width*2;
-    image_.data_size=width*height*2; image_.data=artworkBuffer_.data(); cachedCrc_=crc; decodedValid_=true; music_.artwork(&image_);
+    image_.data_size=width*height*2; image_.data=artworkBuffer_.data(); cachedCrc_=crc; decodedValid_=true;
+    setScreenArtwork(driving_,navigation_,music_,&image_);
     xSemaphoreGive(gui_);
     wake();
 }

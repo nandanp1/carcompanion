@@ -48,9 +48,19 @@ data class NavigationState(
     val updatedAtElapsedMs: Long = 0,
     val source: String = "No navigation",
     val reliable: Boolean = false,
+    /** Separate presence confirmation; null keeps structured/mock providers' update timeout. */
+    val routeConfirmedAtElapsedMs: Long? = null,
 ) {
-    fun fresh(nowElapsedMs: Long): NavigationState =
-        if (active && nowElapsedMs - updatedAtElapsedMs > 30_000L) NavigationState(source = "$source (stale)") else this
+    fun fresh(nowElapsedMs: Long): NavigationState {
+        if (!active) return this
+        if (nowElapsedMs - (routeConfirmedAtElapsedMs ?: updatedAtElapsedMs) !in 0..30_000L)
+            return NavigationState(source = "$source (presence unavailable)")
+        if (nowElapsedMs - updatedAtElapsedMs !in 0..30_000L) return copy(
+            maneuver = Maneuver.UNKNOWN, distanceText = "", road = "", etaText = "", reliable = false,
+            source = if (source.endsWith(" (instruction stale)")) source else "$source (instruction stale)",
+        )
+        return this
+    }
 }
 
 data class MusicState(

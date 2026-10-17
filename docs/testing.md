@@ -46,12 +46,15 @@ Perform interactions while parked, then have a passenger observe any driving che
 | Touch calibration | All four corners and center map to expected display positions | Not run |
 | Tap and short drag | No page change | Not run |
 | Deliberate horizontal swipe | Dashboard left→music; right→navigation, smooth transition | User confirmed faster swipes after update; full directional/threshold checklist pending. |
-| Route starts/ends | Opens navigation once, manual override works, returns to previous selection | Not run |
+| Real Maps route starts, demo off | From driving or music, start an actual route; navigation opens once and shows only supported public notification fields | Updated physical phone opened Navigation from saved Driving when it discovered the already-active real route. After firmware installation, user confirmed Navigation opens automatically on the display when asked to end and restart the real route. |
+| Manual page override during active route | Swipe to driving/music and wait at least 45 seconds while the route notification remains present; five-second presence checks do not force navigation back into view | Not run |
 | Restart after manual selection | Saved page/settings restore as documented | Not run |
 | Brightness 5/50/100 percent | Panel responds without flicker; value survives reboot | Not run |
 | First association/bond | Correct physical display selected; encrypted data access succeeds | Not run |
 | MTU23 and larger negotiated MTU | Same states and image; no fixed chunk-size assumption | Not run |
 | 240×240 JPEG | Correct colors/orientation, bounded memory, complete status after decode | Full-scale decode/CRC/attachment and buffer reuse verified across three covers; user confirmed visible covers stay full size. Formal color/orientation check pending. |
+| Compact covers on driving and navigation | Both pages show the current album's 52×52 thumbnail with one-line title/artist; speed, maneuver, road and limits remain readable; switching pages reuses the same cover | Production LVGL render assertions and screenshots passed; actual Spotify artwork verified on both physical-phone preview pages. User confirmed covers appear on both physical-display pages after installation. |
+| Compact cover during track change or missing artwork | Neither page shows the previous track's cover beside new metadata; text stays centered in the reserved footer until matching artwork arrives, without overlapping the main display | Not run |
 | Duplicate/corrupt/missing image packet | Idempotent duplicate, rejection/retry, no reboot | Not run |
 | Oversized/progressive/invalid JPEG | Clean failure, no memory overwrite, UI remains responsive | Not run |
 | Disconnect halfway through image | Incomplete data released; successful retransfer after reconnect | Not run |
@@ -64,9 +67,10 @@ Perform interactions while parked, then have a passenger observe any driving che
 | GPS stops/tunnel/location revoked | Speed becomes `—` within three seconds | Not run |
 | No speed-limit provider | Limit always `—`, never road-class guess | Not run |
 | Stale/low-confidence road API result | Limit rejected; network errors do not crash service | Not run |
-| Maps supported notification text | Explicit instruction matches screenshot; only exposed values appear | Not run |
+| Maps supported notification text | Explicit instruction matches screenshot; only exposed values appear | Actual Maps 26.41.04 notification parsed on Pixel 9 Pro XL: distance-prefixed Keep right instruction, road and arrival time appeared correctly in the preview. Other versions/locales pending. |
 | Maps unsupported/localized text | Missing arrow/road stays unknown; diagnostic explains limitation | Not run |
-| Route stops/notification removed | Navigation stops and restores prior page | Not run |
+| Stale instruction with confirmed route presence | Keep an active notification present without new posted updates for over 30 seconds; instruction fields become unavailable and diagnostics explain staleness, while route presence and the manually selected page remain unchanged | Not run |
+| Route stops/notification removed | End the real Maps route after manually switching pages; navigation becomes inactive and restores the page selected before the route began | Not run |
 | Phone locks, app backgrounded | Visible foreground notification; BLE and location continue if permitted | Not run |
 | Revoke notification/BLE/location permission | Graceful diagnostics and unavailable data | Not run |
 | Bluetooth toggle/device power cycle | Capped reconnect backoff, no overlapping GATT operations | Not run |

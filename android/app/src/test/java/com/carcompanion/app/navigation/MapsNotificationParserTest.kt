@@ -56,4 +56,32 @@ class MapsNotificationParserTest {
         assertFalse(state.fresh(31_001).active)
         assertEquals(Maneuver.UNKNOWN, state.fresh(31_001).maneuver)
     }
+    @Test fun observedMapsProgressTitleParsesDistanceInstructionAndArrival() {
+        // Captured structure: Maps 26.41.04.993332563 on Android 17 (API37).
+        // The road is sanitized; no original location or route is retained in this fixture.
+        val input = notification(title = "350\u00a0ft · Keep right to stay on Sample Rd", text = "")
+            .copy(subText = "Arrive 1:31 PM")
+        val state = MapsNotificationParser.parse(input, 1000).state!!
+        assertTrue(state.active)
+        assertTrue(state.reliable)
+        assertEquals(Maneuver.SLIGHT_RIGHT, state.maneuver)
+        assertEquals("350 ft", state.distanceText)
+        assertEquals("Sample Rd", state.road)
+        assertEquals("1:31 PM", state.etaText)
+    }
+    @Test fun syntheticUnicodeSpacingSupportsDistanceAndInstruction() {
+        val state = MapsNotificationParser.parse(notification(
+            title = "0.3\u202fmi\u2009·\u2009Turn\u00a0left onto Sample Road", text = ""), 1000).state!!
+        assertEquals(Maneuver.LEFT, state.maneuver)
+        assertEquals("0.3 mi", state.distanceText)
+        assertEquals("Sample Road", state.road)
+    }
+    @Test fun arbitraryPrefixBeforeMiddleDotNeverInventsInstruction() {
+        val state = MapsNotificationParser.parse(notification(
+            title = "Destination · Turn right onto Sample Road", text = ""), 1000).state!!
+        assertTrue(state.active)
+        assertFalse(state.reliable)
+        assertEquals(Maneuver.UNKNOWN, state.maneuver)
+        assertEquals("", state.road)
+    }
 }

@@ -55,6 +55,33 @@ std::string limit(const DisplayState& s,uint64_t now) {
     char value[20]; snprintf(value,sizeof(value),"LIMIT  %.0f",s.speedLimitMph); return value;
 }
 }
+void NowPlayingFooter::create(lv_obj_t* parent) {
+    art_=lv_image_create(parent); lv_obj_set_pos(art_,104,378); lv_obj_set_size(art_,52,52);
+    // Image-widget scaling renders into the existing clipped draw stripes;
+    // this is not an object transform or a second decoded-artwork allocation.
+    lv_image_set_inner_align(art_,LV_IMAGE_ALIGN_CONTAIN);
+    lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN);
+    title_=singleLineLabel(parent,"No music",104,381,280,&lv_font_montserrat_16);
+    artist_=singleLineLabel(parent,"Connect your phone",104,406,280,&lv_font_montserrat_16,Grey);
+}
+void NowPlayingFooter::artwork(const lv_image_dsc_t* image) {
+    lv_image_set_src(art_,image);
+    if(!image) lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN);
+}
+void NowPlayingFooter::update(const DisplayState& s,uint32_t cachedCrc,bool decodedValid) {
+    const bool show=decodedValid && s.artworkPresent && s.artworkId==cachedCrc && lv_image_get_src(art_);
+    if(show) lv_obj_remove_flag(art_,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN);
+    if(show!=layoutWithArtwork_) {
+        layoutWithArtwork_=show;
+        for(auto* text:{title_,artist_}) {
+            lv_obj_set_x(text,show?172:104); lv_obj_set_width(text,show?212:280);
+            lv_obj_set_style_text_align(text,show?LV_TEXT_ALIGN_LEFT:LV_TEXT_ALIGN_CENTER,0);
+        }
+    }
+    if(playing_!=s.playing) { playing_=s.playing; lv_obj_set_style_text_color(title_,lv_color_hex(playing_?Green:White),0); }
+    setMetadata(title_,s.title,titleText_); setMetadata(artist_,s.artist,artistText_);
+}
 lv_obj_t* DrivingScreen::create() {
     auto* p=page(); label(p,"986  /  CAR COMPANION",90,39,300,&lv_font_montserrat_16,Grey);
     clock_=label(p,"--:--",155,76,170,&lv_font_montserrat_24);
@@ -62,30 +89,31 @@ lv_obj_t* DrivingScreen::create() {
     label(p,"MPH",190,244,100,&lv_font_montserrat_20,Grey);
     limit_=label(p,"LIMIT  —",140,285,200,&lv_font_montserrat_20);
     status_=label(p,"PHONE DISCONNECTED",90,331,300,&lv_font_montserrat_16,Grey);
-    music_=singleLineLabel(p,"Connect your phone",65,385,350,&lv_font_montserrat_16,Green);
-    label(p,"NAV  •  DRIVE  •  MUSIC",90,423,300,&lv_font_montserrat_16,Grey);
+    nowPlaying_.create(p);
     return p;
 }
-void DrivingScreen::update(const DisplayState& s,uint64_t now) {
+void DrivingScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,bool decodedValid) {
     set(speed_,speed(s,now)); set(limit_,limit(s,now)); set(clock_,s.clock);
     set(status_,s.demo?"DEMO • SIMULATED DATA":!s.connected?"PHONE DISCONNECTED":!s.speedAvailable(now)?"GPS UNAVAILABLE":"BLUETOOTH CONNECTED");
-    setMetadata(music_,s.title+(s.artist.empty()?"":"  /  "+s.artist),musicText_);
+    nowPlaying_.update(s,cachedCrc,decodedValid);
 }
 lv_obj_t* NavigationScreen::create() {
-    auto* p=page(); label(p,"NAVIGATION",120,39,240,&lv_font_montserrat_16,Blue);
+    auto* p=page(); status_=singleLineLabel(p,"NAVIGATION",90,39,300,&lv_font_montserrat_16,Blue);
     arrow_=label(p,"—",150,91,180,&lv_font_montserrat_48,Blue);
     arrowLine_=lv_line_create(p); lv_obj_set_pos(arrowLine_,180,78);
     lv_obj_set_style_line_color(arrowLine_,lv_color_hex(Blue),0);
     lv_obj_set_style_line_width(arrowLine_,10,0); lv_obj_set_style_line_rounded(arrowLine_,true,0);
     lv_obj_add_flag(arrowLine_,LV_OBJ_FLAG_HIDDEN);
-    distance_=label(p,"—",80,200,320,&lv_font_montserrat_48);
-    road_=label(p,"No active route",60,267,360,&lv_font_montserrat_24);
-    eta_=label(p,"",65,311,350,&lv_font_montserrat_20,Grey);
-    speed_=label(p,"— MPH     LIMIT  —",65,367,350,&lv_font_montserrat_20);
-    status_=label(p,"Waiting for navigation",75,415,330,&lv_font_montserrat_16,Grey);
+    distance_=singleLineLabel(p,"—",80,192,320,&lv_font_montserrat_48);
+    road_=label(p,"No active route",60,250,360,&lv_font_montserrat_24);
+    lv_obj_set_height(road_,2*lv_font_get_line_height(&lv_font_montserrat_24));
+    lv_obj_set_style_text_line_space(road_,0,0);
+    eta_=singleLineLabel(p,"",65,310,350,&lv_font_montserrat_20,Grey);
+    speed_=singleLineLabel(p,"— MPH     LIMIT  —",65,344,350,&lv_font_montserrat_20);
+    nowPlaying_.create(p);
     return p;
 }
-void NavigationScreen::update(const DisplayState& s,uint64_t now) {
+void NavigationScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,bool decodedValid) {
     const std::string maneuver=s.navigationActive?s.maneuver:"inactive";
     // Setting line points invalidates the arrow even when unchanged. Only
     // redraw its geometry when the maneuver changes, not on every speed tick.
@@ -119,10 +147,11 @@ void NavigationScreen::update(const DisplayState& s,uint64_t now) {
     else { lv_obj_add_flag(arrowLine_,LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(arrow_,LV_OBJ_FLAG_HIDDEN); }
     set(arrow_,symbol);
     }
-    set(distance_,s.navigationActive&&!s.distance.empty()?s.distance:"—");
-    set(road_,s.navigationActive?(s.road.empty()?"Instruction unavailable":s.road):"No active route");
-    set(eta_,s.navigationActive?s.eta:""); set(speed_,speed(s,now)+" MPH     "+limit(s,now));
-    set(status_,s.demo?"DEMO • SIMULATED DATA":s.navigationActive?s.navigationStatus:"Waiting for navigation");
+    setMetadata(distance_,s.navigationActive&&!s.distance.empty()?s.distance:"—",distanceText_);
+    setMetadata(road_,s.navigationActive?(s.road.empty()?"Instruction unavailable":s.road):"No active route",roadText_);
+    setMetadata(eta_,s.navigationActive?s.eta:"",etaText_); set(speed_,speed(s,now)+" MPH     "+limit(s,now));
+    set(status_,s.demo?"DEMO NAVIGATION":s.navigationActive && s.navigationStatus=="Instruction unavailable"?"CHECK PHONE NAVIGATION":"NAVIGATION");
+    nowPlaying_.update(s,cachedCrc,decodedValid);
 }
 lv_obj_t* MusicScreen::create(std::function<void(uint8_t)> command) {
     command_=command; auto* p=page(); label(p,"SPOTIFY",130,25,220,&lv_font_montserrat_16,Green);
@@ -174,4 +203,7 @@ void MusicScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,b
     uint64_t position=s.positionMs;
     if(s.playing && s.connected && now>=s.musicReceivedMs) position+=now-s.musicReceivedMs;
     lv_bar_set_value(progress_,s.durationMs?static_cast<int>(std::min<uint64_t>(position,s.durationMs)*1000/s.durationMs):0,LV_ANIM_OFF);
+}
+void setScreenArtwork(DrivingScreen& driving,NavigationScreen& navigation,MusicScreen& music,const lv_image_dsc_t* image) {
+    driving.artwork(image); navigation.artwork(image); music.artwork(image);
 }

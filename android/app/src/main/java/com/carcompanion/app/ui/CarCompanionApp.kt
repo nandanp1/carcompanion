@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -156,6 +158,8 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
     var drag by remember { mutableFloatStateOf(0f) }
     val pages = listOf(DisplayPage.NAVIGATION, DisplayPage.DRIVING, DisplayPage.MUSIC)
     val bitmap = remember(artwork?.contentId) { artwork?.jpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
+    // Metadata can arrive before its JPEG. Never show the previous track's cover in any view.
+    val currentArtwork = bitmap?.takeIf { state.music.artworkId == artwork?.contentId }
     BoxWithConstraints(modifier.clip(RoundedCornerShape(30.dp)).background(Color.Black).border(1.dp, Line, RoundedCornerShape(30.dp))
         .pointerInput(state.page) {
             detectHorizontalDragGestures(onDragStart = { drag = 0f }, onDragEnd = {
@@ -206,7 +210,7 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
                     }
                     DisplayPage.MUSIC -> Column(Modifier.fillMaxSize().padding(top = (14 * scale).dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         val artSize = (137 * scale).dp
-                        if (bitmap != null && state.music.artworkId == artwork?.contentId) Image(bitmap, "Album artwork", Modifier.size(artSize).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                        if (currentArtwork != null) Image(currentArtwork, "Album artwork", Modifier.size(artSize).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                         else Box(Modifier.size(artSize).background(Panel, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) { Text("♫", fontSize = 52.sp, color = Green) }
                         MusicRow(state.music.title.ifBlank { "Nothing playing" }, 17 * scale, Color.White, FontWeight.Medium, Modifier.padding(top = (14 * scale).dp))
                         MusicRow(state.music.artist.ifBlank { "Play something on Spotify" }, 12 * scale, Muted)
@@ -217,9 +221,10 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
                     }
                 }
             }
-            if (state.page == DisplayPage.DRIVING) {
-                MusicRow(state.music.title.ifBlank { "Spotify · not playing" }, 12 * scale, if (state.music.playing) Green else Muted)
-                if (state.music.artist.isNotBlank()) MusicRow(state.music.artist, 10 * scale, Muted, modifier = Modifier.padding(top = (3 * scale).dp))
+            if (state.page != DisplayPage.MUSIC) {
+                Spacer(Modifier.height((10 * scale).dp))
+                NowPlayingStrip(state.music, currentArtwork, scale)
+                Spacer(Modifier.height((12.5f * scale).dp))
             }
         }
     }
@@ -228,11 +233,31 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
 private val metadataLineBreaks = Regex("[\\r\\n\\t\\u0085\\u2028\\u2029]+")
 
 @Composable
-private fun MusicRow(text: String, size: Float, color: Color, weight: FontWeight = FontWeight.Normal, modifier: Modifier = Modifier) {
+private fun NowPlayingStrip(music: MusicState, artwork: ImageBitmap?, scale: Float) {
+    // Map the firmware footer (x104, y378, width280, height52) onto the 360dp preview grid.
+    val coverSize = (39 * scale).dp
+    Row(Modifier.width((210 * scale).dp).offset(x = (3 * scale).dp).height(coverSize),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy((12 * scale).dp)) {
+        if (artwork != null) {
+            Image(artwork, "Current album artwork", Modifier.size(coverSize).clip(RoundedCornerShape((4 * scale).dp)),
+                contentScale = ContentScale.Crop)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy((2 * scale).dp)) {
+            val alignment = if (artwork == null) TextAlign.Center else TextAlign.Start
+            MusicRow(music.title.ifBlank { "Spotify · not playing" }, 12 * scale,
+                if (music.playing) Green else Color.White, FontWeight.Medium, alignment = alignment)
+            if (music.artist.isNotBlank()) MusicRow(music.artist, 12 * scale, Muted, alignment = alignment)
+        }
+    }
+}
+
+@Composable
+private fun MusicRow(text: String, size: Float, color: Color, weight: FontWeight = FontWeight.Normal,
+                     modifier: Modifier = Modifier, alignment: TextAlign = TextAlign.Center) {
     val singleLine = remember(text) { text.replace(metadataLineBreaks, " ").trim() }
     Text(singleLine, modifier.fillMaxWidth(), color = color, fontSize = size.sp, lineHeight = (size * 1.3f).sp,
         fontWeight = weight, minLines = 1, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        textAlign = alignment)
 }
 
 @Composable private fun SpeedLimit(limit: Int?) {

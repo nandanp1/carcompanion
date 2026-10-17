@@ -2,23 +2,37 @@
 #include "DisplayState.h"
 #include "lvgl.h"
 #include <functional>
+class NowPlayingFooter {
+public:
+    void create(lv_obj_t* parent);
+    void artwork(const lv_image_dsc_t* image);
+    void update(const DisplayState&,uint32_t cachedCrc,bool decodedValid);
+private:
+    lv_obj_t *art_=nullptr,*title_=nullptr,*artist_=nullptr;
+    std::string titleText_="No music",artistText_="Connect your phone";
+    bool layoutWithArtwork_=false,playing_=false;
+};
 class DrivingScreen {
 public:
     lv_obj_t* create();
-    void update(const DisplayState&,uint64_t now);
+    void update(const DisplayState&,uint64_t now,uint32_t cachedCrc,bool decodedValid);
+    void artwork(const lv_image_dsc_t* image) { nowPlaying_.artwork(image); }
 private:
-    lv_obj_t *speed_=nullptr,*limit_=nullptr,*clock_=nullptr,*status_=nullptr,*music_=nullptr;
-    std::string musicText_="Connect your phone";
+    lv_obj_t *speed_=nullptr,*limit_=nullptr,*clock_=nullptr,*status_=nullptr;
+    NowPlayingFooter nowPlaying_;
 };
 class NavigationScreen {
 public:
     lv_obj_t* create();
-    void update(const DisplayState&,uint64_t now);
+    void update(const DisplayState&,uint64_t now,uint32_t cachedCrc,bool decodedValid);
+    void artwork(const lv_image_dsc_t* image) { nowPlaying_.artwork(image); }
 private:
     lv_obj_t *arrow_=nullptr,*distance_=nullptr,*road_=nullptr,*eta_=nullptr,*speed_=nullptr,*status_=nullptr;
     lv_obj_t* arrowLine_=nullptr;
     lv_point_precise_t arrowPoints_[6]={};
     std::string drawnManeuver_;
+    std::string distanceText_="—",roadText_="No active route",etaText_;
+    NowPlayingFooter nowPlaying_;
 };
 class MusicScreen {
 public:
@@ -32,3 +46,6 @@ private:
     bool loggedPresence_=false,loggedDecoded_=false,visibilityLogged_=false;
     std::string titleText_="No music",artistText_="Connect your phone",albumText_;
 };
+// Keep shared descriptor attachment/detachment identical in production and
+// renderer tests; callers must hold the LVGL mutex on the device.
+void setScreenArtwork(DrivingScreen&,NavigationScreen&,MusicScreen&,const lv_image_dsc_t* image);
