@@ -35,18 +35,18 @@ Perform interactions while parked, then have a passenger observe any driving che
 | Phase 1 demo mode | Clearly labeled synthetic dashboard, navigation and music | Not run |
 | Touch calibration | All four corners and center map to expected display positions | Not run |
 | Tap and short drag | No page change | Not run |
-| Deliberate horizontal swipe | Dashboard left→music; right→navigation, smooth transition | Not run |
+| Deliberate horizontal swipe | Dashboard left→music; right→navigation, smooth transition | User confirmed faster swipes after update; full directional/threshold checklist pending. |
 | Route starts/ends | Opens navigation once, manual override works, returns to previous selection | Not run |
 | Restart after manual selection | Saved page/settings restore as documented | Not run |
 | Brightness 5/50/100 percent | Panel responds without flicker; value survives reboot | Not run |
 | First association/bond | Correct physical display selected; encrypted data access succeeds | Not run |
 | MTU23 and larger negotiated MTU | Same states and image; no fixed chunk-size assumption | Not run |
-| 240×240 JPEG | Correct colors/orientation, bounded memory, complete status after decode | Not run |
+| 240×240 JPEG | Correct colors/orientation, bounded memory, complete status after decode | Full-scale decode/CRC/attachment verified on device; user confirmed visible cover. Formal color/orientation check pending. |
 | Duplicate/corrupt/missing image packet | Idempotent duplicate, rejection/retry, no reboot | Not run |
 | Oversized/progressive/invalid JPEG | Clean failure, no memory overwrite, UI remains responsive | Not run |
 | Disconnect halfway through image | Incomplete data released; successful retransfer after reconnect | Not run |
 | Reconnect with same track | Full state restored; cached artwork not resent | Not run |
-| Rapid track changes | Latest title/art match; no wrong-cover association | Not run |
+| Rapid track changes | Latest title/art match; no wrong-cover association | Live track callbacks, obsolete-image cancellation and CRC matching exercised; user confirmed faster updates. Longer stress test pending. |
 | Spotify art absent | Placeholder, no cover from prior song | Not run |
 | Play/pause/next/previous | Supported session actions occur once each | Not run |
 | Real GPS outdoors | Plausible mph, units correct, confidence/age visible in diagnostics | Not run |
