@@ -17,7 +17,7 @@ Local deliverables are packaged in `artifacts/car-companion-0.1.0.zip`: source, 
 | Spotify | Active MediaSession metadata, artwork extraction, 240×240 baseline JPEG with bounded fallback, CRC32 transfer/cache, optional transport controls |
 | Navigation | Experimental conservative Google Maps notification parser, field inspector, mock route provider and structured integration interface |
 | Transport | Six custom GATT characteristics, MTU-aware framing, sequenced byte offsets, duplicates/retries, one-write flow control, reconnect and state restoration |
-| Memory | No full framebuffer or PSRAM assumption; 20-line DMA stripe, compressed artwork capped at 32 KiB, one decoded image capped at 240×240 RGB565 |
+| Memory | No full framebuffer or PSRAM assumption; two 10-line DMA stripes, compressed artwork capped at 32 KiB, one decoded image capped at 240×240 RGB565 |
 
 Google Maps does not promise third-party access to its active navigation. The parser only displays explicit supported text; unavailable fields stay unavailable. No AccessibilityService, private Android Auto API, Spotify Web API login, Raspberry Pi or Bluetooth audio endpoint is involved. A real road-data service is optional and must be supplied/configured by the user; no speed-limit database or fabricated default is bundled.
 
