@@ -1,0 +1,16 @@
+.cache/
+.DS_Store
+**/build/
+**/.gradle/
+**/local.properties
+**/.idea/
+**/managed_components/
+**/sdkconfig
+**/sdkconfig.old
+*.pyc
+__pycache__/
+*.jks
+*.keystore
+.env
+artifacts/
+backups/

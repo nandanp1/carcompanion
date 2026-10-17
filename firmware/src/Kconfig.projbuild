@@ -1,0 +1,7 @@
+menu "Car Companion"
+config COMPANION_SIMULATED_DATA
+    bool "Show clearly labeled simulated driving/music/navigation data"
+    default n
+    help
+        Bench testing only. The display shows DEMO; never enable for road use.
+endmenu

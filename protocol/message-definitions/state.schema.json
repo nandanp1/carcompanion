@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://carcompanion.local/protocol/1/state.schema.json",
+  "title": "Car Companion 1.0 logical state payloads",
+  "$comment": "UTF-8 byte limits in specification.md are stricter than JSON Schema Unicode character maxLength. Enforce both. Frames are little-endian binary, not JSON.",
+  "oneOf": [
+    {
+      "title": "Driving",
+      "type": "object",
+      "required": [
+        "speed_mph",
+        "gps_age_ms",
+        "limit_mph",
+        "limit_confidence",
+        "limit_age_ms",
+        "limit_source"
+      ],
+      "properties": {
+        "speed_mph": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 300
+        },
+        "gps_age_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "accuracy_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 50
+        },
+        "limit_mph": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 200
+        },
+        "limit_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "limit_age_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "limit_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 96
+        }
+      }
+    },
+    {
+      "title": "Navigation",
+      "type": "object",
+      "required": [
+        "active",
+        "maneuver",
+        "reliable",
+        "source"
+      ],
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "maneuver": {
+          "enum": [
+            "unknown",
+            "straight",
+            "left",
+            "right",
+            "slight_left",
+            "slight_right",
+            "uturn",
+            "roundabout",
+            "arrive"
+          ]
+        },
+        "distance": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 96
+        },
+        "road": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 96
+        },
+        "eta": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32
+        },
+        "reliable": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 96
+        }
+      }
+    },
+    {
+      "title": "Music",
+      "type": "object",
+      "required": [
+        "track_id",
+        "title",
+        "artist",
+        "album",
+        "duration_ms",
+        "position_ms",
+        "playing",
+        "art_crc"
+      ],
+      "properties": {
+        "track_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "artist": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "album": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "position_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "playing": {
+          "type": "boolean"
+        },
+        "art_crc": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    }
+  ]
+}

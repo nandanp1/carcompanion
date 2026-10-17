@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(companion_host_tests LANGUAGES CXX)
+enable_testing()
+add_executable(state_tests state_tests.cpp ../src/Protocol.cpp)
+target_include_directories(state_tests PRIVATE ../include)
+target_compile_features(state_tests PRIVATE cxx_std_17)
+target_compile_options(state_tests PRIVATE -Wall -Wextra -Werror)
+add_test(NAME firmware_state_protocol COMMAND state_tests)
