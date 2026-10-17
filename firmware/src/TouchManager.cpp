@@ -3,6 +3,7 @@ void TouchManager::init(Board& board,lv_display_t* display,std::function<void(in
     board_=&board; swipe_=swipe;
     lv_indev_t* input=lv_indev_create(); lv_indev_set_type(input,LV_INDEV_TYPE_POINTER);
     lv_indev_set_display(input,display); lv_indev_set_user_data(input,this); lv_indev_set_read_cb(input,read);
+    lv_timer_set_period(lv_indev_get_read_timer(input),16);
 }
 void TouchManager::read(lv_indev_t* input,lv_indev_data_t* data) {
     auto* self=static_cast<TouchManager*>(lv_indev_get_user_data(input));

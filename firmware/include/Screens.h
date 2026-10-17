@@ -17,6 +17,7 @@ private:
     lv_obj_t *arrow_=nullptr,*distance_=nullptr,*road_=nullptr,*eta_=nullptr,*speed_=nullptr,*status_=nullptr;
     lv_obj_t* arrowLine_=nullptr;
     lv_point_precise_t arrowPoints_[6]={};
+    std::string drawnManeuver_;
 };
 class MusicScreen {
 public:
@@ -26,4 +27,6 @@ public:
 private:
     lv_obj_t *art_=nullptr,*title_=nullptr,*artist_=nullptr,*album_=nullptr,*progress_=nullptr,*play_=nullptr,*placeholder_=nullptr;
     std::function<void(uint8_t)> command_;
+    uint32_t loggedExpectedCrc_=0,loggedDecodedCrc_=0;
+    bool loggedPresence_=false,loggedDecoded_=false,visibilityLogged_=false;
 };

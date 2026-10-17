@@ -9,6 +9,7 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.carcompanion.app.model.AppStore
 import com.carcompanion.app.model.MusicState
 import com.carcompanion.app.navigation.MapsNotificationListener
@@ -27,7 +28,7 @@ class SpotifyMediaMonitor(private val context: Context, private val scope: Corou
     private var artworkKey: String? = null
     private val callback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = publishMetadata(metadata)
-        override fun onPlaybackStateChanged(state: PlaybackState?) = tick()
+        override fun onPlaybackStateChanged(state: PlaybackState?) = publishPlayback(state)
         override fun onSessionDestroyed() { bind(null); refresh() }
     }
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { sessions -> choose(sessions.orEmpty()) }
@@ -77,10 +78,20 @@ class SpotifyMediaMonitor(private val context: Context, private val scope: Corou
         val identity = MediaIdentity.trackId(metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID), title, artist, album)
         val old = AppStore.state.value.music
         val duration = (metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L).coerceIn(0, 86_400_000L)
-        AppStore.update { it.copy(music = MusicState(title, artist, album, duration,
+        val playback = controller?.playbackState
+        val playing = playback?.state == PlaybackState.STATE_PLAYING
+        val position = playback?.let { MediaIdentity.position(
+            it.position.coerceAtLeast(0), duration, playing, it.playbackSpeed,
+            it.lastPositionUpdateTime, SystemClock.elapsedRealtime(),
+        ) } ?: 0L
+        // Publish one complete snapshot directly from the callback, before reading or encoding art.
+        AppStore.update { it.copy(music = MusicState(title, artist, album, duration, position, playing,
             artworkId = if (old.trackId == identity) old.artworkId else null, trackId = identity)) }
-        tick()
-        if (old.trackId != identity) AppStore.artwork(null)
+        if (old.trackId != identity) {
+            AppStore.artwork(null)
+            Log.d("CarCompanionMedia", "Metadata callback: track=${identity.take(8)}")
+            AppStore.log("Spotify track changed · preparing artwork")
+        }
         val bitmap = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
@@ -92,20 +103,26 @@ class SpotifyMediaMonitor(private val context: Context, private val scope: Corou
         artworkKey = key
         artworkJob?.cancel()
         artworkJob = scope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
             val art = ArtworkEncoder.encode(context, bitmap, uri, jpegQuality())
             if (AppStore.state.value.music.trackId != identity || artworkKey != key) return@launch
             AppStore.update { it.copy(music = it.music.copy(artworkId = art?.contentId)) }
             AppStore.artwork(art)
+            Log.d("CarCompanionMedia", "Artwork prepared: bytes=${art?.jpeg?.size ?: 0} elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
             AppStore.diagnostic { it.copy(mediaStatus = if (art == null) "Spotify connected · artwork unavailable" else "Spotify connected · ${art.jpeg.size / 1024} KiB artwork") }
         }
     }
 
     fun tick() {
         val state = controller?.playbackState ?: return
-        val playing = state.state == PlaybackState.STATE_PLAYING
+        publishPlayback(state)
+    }
+
+    private fun publishPlayback(state: PlaybackState?) {
+        val playing = state?.state == PlaybackState.STATE_PLAYING
         AppStore.update {
             val current = it.music
-            it.copy(music = current.copy(playing = playing, positionMs = MediaIdentity.position(
+            it.copy(music = current.copy(playing = playing, positionMs = if (state == null) current.positionMs else MediaIdentity.position(
                 state.position.coerceAtLeast(0), current.durationMs, playing, state.playbackSpeed,
                 state.lastPositionUpdateTime, SystemClock.elapsedRealtime(),
             )))

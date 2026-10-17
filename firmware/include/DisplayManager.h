@@ -5,6 +5,7 @@
 #include "TouchManager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include <functional>
 #include <atomic>
 class DisplayManager {
@@ -20,10 +21,17 @@ public:
 private:
     static void run(void*);
     static void flush(lv_display_t*,const lv_area_t*,uint8_t*);
+    static void waitFlush(lv_display_t*);
     static bool flushed(esp_lcd_panel_io_handle_t,esp_lcd_panel_io_event_data_t*,void*);
+    static void renderEvent(lv_event_t*);
+    void wake();
     void refresh();
     Board* board_=nullptr; SettingsManager* settings_=nullptr;
-    SemaphoreHandle_t gui_=nullptr,stateMutex_=nullptr;
+    SemaphoreHandle_t gui_=nullptr,stateMutex_=nullptr,flushDone_=nullptr;
+    TaskHandle_t task_=nullptr;
+    std::atomic<bool> dirty_{true};
+    uint64_t renderStartedUs_=0,renderTotalUs_=0,lastMetricsMs_=0;
+    uint32_t renderCount_=0,renderMaxUs_=0;
     DisplayState state_;
     PageNavigation pages_;
     Page shown_=Page::Driving;

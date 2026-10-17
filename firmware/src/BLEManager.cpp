@@ -7,6 +7,8 @@
 #include "cJSON.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "host/ble_att.h"
 #include <cstring>
 #include <cmath>
 #include <memory>
@@ -20,6 +22,12 @@ ble_uuid128_t characteristicUuids[6];
 ble_gatt_chr_def characteristics[7]={};
 ble_gatt_svc_def services[2]={};
 uint64_t nowMs() { return esp_timer_get_time()/1000; }
+void logLink(uint16_t handle,const char* event) {
+    ble_gap_conn_desc desc={};
+    if(ble_gap_conn_find(handle,&desc)==0) ESP_LOGI("BLE","%s handle=%u mtu=%u interval=%u*1.25ms latency=%u timeout=%u*10ms encrypted=%u bonded=%u heap=%u largest=%u",
+        event,handle,ble_att_mtu(handle),desc.conn_itvl,desc.conn_latency,desc.supervision_timeout,
+        desc.sec_state.encrypted,desc.sec_state.bonded,heap_caps_get_free_size(MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
 const cJSON* item(const cJSON* root,const char* key) { return cJSON_GetObjectItemCaseSensitive(root,key); }
 bool textField(const cJSON* root,const char* key,std::string& out,size_t max,bool nullable=true) {
     const auto* value=item(root,key);
@@ -47,6 +55,7 @@ void BLEManager::init() {
     instance=this;
     artwork_.init(display_,[this](uint8_t code,uint16_t id,uint32_t offset) { status(2,code,id,offset); });
     ESP_ERROR_CHECK(nimble_port_init()); ble_svc_gap_init(); ble_svc_gatt_init();
+    ESP_ERROR_CHECK(ble_att_set_preferred_mtu(247));
     ble_hs_cfg.sync_cb=sync; ble_hs_cfg.sm_io_cap=BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_hs_cfg.sm_bonding=1; ble_hs_cfg.sm_mitm=0; ble_hs_cfg.sm_sc=1;
     ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
@@ -84,22 +93,45 @@ int BLEManager::gap(ble_gap_event* event,void* arg) {
     auto* self=static_cast<BLEManager*>(arg);
     switch(event->type) {
     case BLE_GAP_EVENT_CONNECT:
+        ESP_LOGI("BLE","connection result=%d",event->connect.status);
         if(event->connect.status==0) {
             self->connectionHandle_=event->connect.conn_handle; self->playbackSequence_=0;
             self->connection_.changed(true);
-            ble_gap_security_initiate(event->connect.conn_handle);
+            logLink(event->connect.conn_handle,"connected");
+            const int security=ble_gap_security_initiate(event->connect.conn_handle);
+            ESP_LOGI("BLE","security initiate=%d",security);
+            // Matches the payload/time request in IDF's NimBLE throughput example.
+            // The central still chooses negotiated link parameters and ATT MTU.
+            const int dataLength=ble_gap_set_data_len(event->connect.conn_handle,251,2120);
+            ESP_LOGI("BLE","request 251-byte link payload result=%d",dataLength);
         } else self->advertise();
         break;
     case BLE_GAP_EVENT_ENC_CHANGE: {
         ble_gap_conn_desc desc={};
         self->encrypted_=event->enc_change.status==0 && ble_gap_conn_find(event->enc_change.conn_handle,&desc)==0 && desc.sec_state.encrypted;
+        ESP_LOGI("BLE","encryption change status=%d encrypted=%u",event->enc_change.status,self->encrypted_.load());
+        logLink(event->enc_change.conn_handle,"security");
         break;
     }
     case BLE_GAP_EVENT_DISCONNECT:
+        ESP_LOGI("BLE","disconnect reason=%d (0x%x)",event->disconnect.reason,event->disconnect.reason);
         self->connectionHandle_=BLE_HS_CONN_HANDLE_NONE; self->encrypted_=false;
         for(auto& receiver:self->receivers_) receiver.reset();
         self->artwork_.disconnected(); self->connection_.changed(false); self->advertise(); break;
     case BLE_GAP_EVENT_ADV_COMPLETE: self->advertise(); break;
+    case BLE_GAP_EVENT_MTU:
+        ESP_LOGI("BLE","ATT MTU changed handle=%u channel=%u mtu=%u",event->mtu.conn_handle,event->mtu.channel_id,event->mtu.value);
+        break;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        ESP_LOGI("BLE","connection update status=%d",event->conn_update.status);
+        logLink(event->conn_update.conn_handle,"updated");
+        break;
+    case BLE_GAP_EVENT_DATA_LEN_CHG:
+        ESP_LOGI("BLE","link payload tx=%u rx=%u bytes",event->data_len_chg.max_tx_octets,event->data_len_chg.max_rx_octets);
+        break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        ESP_LOGI("BLE","subscription handle=%u notify=%u",event->subscribe.attr_handle,event->subscribe.cur_notify);
+        break;
     case BLE_GAP_EVENT_REPEAT_PAIRING:
         // Do not silently delete an existing trusted bond. Reset deliberately
         // with erase-flash when moving this display to another phone.
@@ -160,7 +192,7 @@ bool BLEManager::json(unsigned channel,const uint8_t* data,size_t count) {
     if(channel==0) {
         std::string op; if(!textField(r,"op",op,32,false)) return false;
         double value=0,id=0,size=0,crc=0;
-        if(op=="hello") { status(1,0,0,1); return true; }
+        if(op=="hello") { logLink(connectionHandle_.load(),"app ready"); status(1,0,0,1); return true; }
         if(op=="brightness") { if(!integer(r,"value",value,5,100)) return false; display_.setBrightness(value); return true; }
         if(op=="clock") {
             if(!integer(r,"unix",value,0,4102444800.0) || !integer(r,"offset_min",id,-840,840)) return false;

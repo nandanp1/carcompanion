@@ -8,11 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.carcompanion.app.BuildConfig
 import com.carcompanion.app.model.AppStore
 import com.carcompanion.app.model.DisplayState
+import com.carcompanion.app.model.MusicState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,10 +44,15 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
     @Volatile private var wantedAddress: String? = null
     private var connectedSignal = CompletableDeferred<Unit>()
     private var disconnectedSignal = CompletableDeferred<Unit>()
-    private val operationMutex = Mutex()
-    private val jsonMutex = Mutex()
+    private val operationGate = AttOperationGate()
+    private val sendQueue = PrioritySendQueue()
+    private val jsonMutexes = listOf(Protocol.CONTROL, Protocol.NAVIGATION, Protocol.DRIVING, Protocol.MUSIC).associateWith { Mutex() }
     private val stateMutex = Mutex()
+    private val musicMutex = Mutex()
+    private val modeMutex = Mutex()
     private val artworkMutex = Mutex()
+    private val priorityLock = Any()
+    private var fastTransfers = 0
     private data class Operation(val owner: BluetoothGatt, val type: String, val uuid: UUID?, val result: CompletableDeferred<Int>)
     @Volatile private var operation: Operation? = null
     private val waiters = mutableMapOf<Pair<Int, Int>, Channel<Protocol.Status>>()
@@ -54,6 +61,10 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
     private var nextId = 1
     private var lastPlaybackSequence = -1
     private var lastState: DisplayState? = null
+    private var lastMusic: MusicState? = null
+    private var lastMusicSentMs = 0L
+    private var lastDemo: Boolean? = null
+    private var lastDrivingSentMs = Long.MIN_VALUE
     private var lastClockMinute = Long.MIN_VALUE
     private var brightness = 70
 
@@ -75,6 +86,10 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
                     cachedCrc = 0
                     lastPlaybackSequence = -1
                     lastState = null
+                    lastMusic = null
+                    lastMusicSentMs = 0L
+                    lastDemo = null
+                    lastDrivingSentMs = Long.MIN_VALUE
                     lastClockMinute = Long.MIN_VALUE
                     connectedSignal = CompletableDeferred()
                     disconnectedSignal = CompletableDeferred()
@@ -91,17 +106,19 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
                     logConnection("BLE bond ready · discovering services")
                     perform(active, "services") { active.discoverServices() }
                     check(active.getService(Protocol.SERVICE) != null) { "Car Companion service missing" }
-                    // Some devices decline the MTU request: continuing at the current MTU is safe.
-                    runCatching { perform(active, "mtu") { active.requestMtu(247) } }.onFailure {
-                        if (it is CancellationException) throw it
-                        logConnection("BLE MTU remains $mtu: ${it.message}")
-                    }
                     subscribe(Protocol.CONTROL)
                     subscribe(Protocol.PLAYBACK)
                     logConnection("BLE notifications enabled · MTU $mtu")
                     val hello = exchange(1, 0, JSONObject().put("op", "hello"))
                     check(hello.maxKiB >= 32) { "Firmware artwork capacity unsupported" }
                     cachedCrc = hello.cachedCrc
+                    // A saved bond does not confirm encryption on this new link. The encrypted
+                    // hello proves it is usable before the single MTU request; its status fits MTU23.
+                    // Android14+ chooses its own requested MTU; use only the successful callback.
+                    runCatching { perform(active, "mtu") { active.requestMtu(247) } }.onFailure {
+                        if (it is CancellationException) throw it
+                        logConnection("BLE MTU remains $mtu: ${it.message}")
+                    }
                     mutableConnection.value = ConnectionInfo(true, "Connected", mtu,
                         if (hello.offset == 1L) "0.1.0 / protocol 1" else "Build ${hello.offset} / protocol 1")
                     sendJson(Protocol.CONTROL, JSONObject().put("op", "brightness").put("value", brightness))
@@ -155,12 +172,17 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         }
     }
 
-    suspend fun sendState(state: DisplayState) = stateMutex.withLock {
+    suspend fun sendState(latest: () -> DisplayState) = stateMutex.withLock {
         if (!connection.value.connected) return@withLock
-        if (state.demo != lastState?.demo) sendJson(Protocol.CONTROL, JSONObject().put("op", "demo").put("enabled", state.demo))
-        sendJson(Protocol.DRIVING, StateEncoder.driving(state))
+        sendMusic(latest)
+        val state = latest()
+        sendMode(state.demo)
         if (state.navigation != lastState?.navigation) sendJson(Protocol.NAVIGATION, StateEncoder.navigation(state))
-        if (state.music != lastState?.music) sendJson(Protocol.MUSIC, StateEncoder.music(state))
+        val now = SystemClock.elapsedRealtime()
+        if (state.driving != lastState?.driving || lastDrivingSentMs == Long.MIN_VALUE || now - lastDrivingSentMs >= 1_000) {
+            sendJson(Protocol.DRIVING, StateEncoder.driving(state))
+            lastDrivingSentMs = SystemClock.elapsedRealtime()
+        }
         val seconds = System.currentTimeMillis() / 1000
         if (seconds / 60 != lastClockMinute) {
             sendJson(Protocol.CONTROL, JSONObject().put("op", "clock").put("unix", seconds)
@@ -168,6 +190,53 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
             lastClockMinute = seconds / 60
         }
         lastState = state
+    }
+
+    /** Separate from telemetry: a track change does not wait for a driving snapshot. */
+    suspend fun sendMusic(latest: () -> DisplayState) = musicMutex.withLock {
+        while (connection.value.connected) {
+            val state = latest()
+            if (!MusicUpdatePolicy.shouldSend(state.music, lastMusic, SystemClock.elapsedRealtime() - lastMusicSentMs, mtu)) return@withLock
+            sendMode(state.demo)
+            val json = StateEncoder.music(state)
+            val identity = state.music.copy(positionMs = 0)
+            val changedTrack = state.music.trackId != lastMusic?.trackId || state.music.title != lastMusic?.title ||
+                state.music.artworkId != lastMusic?.artworkId
+            val changedMetadata = identity != lastMusic?.copy(positionMs = 0)
+            val started = SystemClock.elapsedRealtime()
+            if (changedTrack) logConnection("BLE metadata start · ${json.toString().toByteArray().size} bytes · MTU $mtu")
+            suspend fun publish() = sendJson(Protocol.MUSIC, json) {
+                val current = latest()
+                current.demo == state.demo && current.music.copy(positionMs = 0) == identity
+            }
+            val completed = if (changedMetadata) withFastConnection { publish() } else publish()
+            if (!completed) continue // A new first fragment replaces an obsolete partial JSON message.
+            lastMusic = state.music
+            lastMusicSentMs = SystemClock.elapsedRealtime()
+            if (changedTrack) logConnection("BLE metadata sent · ${SystemClock.elapsedRealtime() - started}ms")
+            return@withLock
+        }
+    }
+
+    private suspend fun sendMode(demo: Boolean) = modeMutex.withLock {
+        if (lastDemo != demo) {
+            sendJson(Protocol.CONTROL, JSONObject().put("op", "demo").put("enabled", demo))
+            lastDemo = demo
+        }
+    }
+
+    private suspend fun <T> withFastConnection(action: suspend () -> T): T {
+        val active = gatt ?: error("Disconnected")
+        synchronized(priorityLock) {
+            if (fastTransfers++ == 0) runCatching { active.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) }
+        }
+        try { return action() }
+        finally {
+            synchronized(priorityLock) {
+                fastTransfers--
+                if (fastTransfers == 0) runCatching { gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_BALANCED) }
+            }
+        }
     }
 
     suspend fun sendArtwork(bytes: ByteArray, contentId: Long) = artworkMutex.withLock {
@@ -180,12 +249,18 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
             mtu = { mtu },
             begin = { transferId, size, checksum -> exchange(2, transferId,
                 JSONObject().put("op", "art_begin").put("id", transferId).put("size", size).put("crc", checksum)) },
-            write = { write(Protocol.ARTWORK, it) },
+            write = { packet -> sendQueue.run(PrioritySendQueue.Priority.ARTWORK) { write(Protocol.ARTWORK, packet) } },
             commit = { transferId -> exchange(2, transferId, JSONObject().put("op", "art_commit").put("id", transferId)) },
         )
-        transfer.send(bytes, id)
+        val started = SystemClock.elapsedRealtime()
+        logConnection("BLE artwork start · ${bytes.size} bytes · MTU $mtu")
+        try { withFastConnection { transfer.send(bytes, id) } }
+        catch (cancelled: CancellationException) {
+            logConnection("BLE artwork canceled · ${SystemClock.elapsedRealtime() - started}ms")
+            throw cancelled
+        }
         cachedCrc = crc
-        AppStore.log("Artwork verified · ${bytes.size} bytes")
+        logConnection("Artwork verified · ${bytes.size} bytes · ${SystemClock.elapsedRealtime() - started}ms")
     }
 
     private suspend fun ensureBond(device: BluetoothDevice) {
@@ -234,16 +309,26 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         }
     }
 
-    private suspend fun sendJson(uuid: UUID, json: JSONObject) = jsonMutex.withLock {
+    private suspend fun sendJson(uuid: UUID, json: JSONObject, isCurrent: () -> Boolean = { true }): Boolean = jsonMutexes.getValue(uuid).withLock {
         val bytes = json.toString().toByteArray(Charsets.UTF_8)
         require(bytes.size in 1..1024) { "State exceeds protocol bound" }
         val id = allocateId()
         var offset = 0
-        while (offset < bytes.size) {
+        suspend fun fragment() {
             val frame = Protocol.frame(bytes, id, offset, mtu)
             write(uuid, frame)
             offset += frame.size - Protocol.HEADER_SIZE
         }
+        if (uuid == Protocol.DRIVING) {
+            // Yield between telemetry fragments so a new track is never stuck behind them.
+            while (offset < bytes.size) sendQueue.run(PrioritySendQueue.Priority.DRIVING) { fragment() }
+        } else {
+            // Finish an urgent JSON message before resuming any background image chunks.
+            sendQueue.run(PrioritySendQueue.Priority.METADATA) {
+                while (offset < bytes.size && isCurrent()) fragment()
+            }
+        }
+        offset == bytes.size
     }
     @Synchronized private fun allocateId(): Int = nextId.also { nextId = if (it == 65535) 1 else it + 1 }
     private fun characteristic(uuid: UUID): BluetoothGattCharacteristic =
@@ -258,7 +343,7 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         }
     }
 
-    private suspend fun perform(active: BluetoothGatt, type: String, uuid: UUID? = null, start: () -> Boolean): Int = operationMutex.withLock {
+    private suspend fun perform(active: BluetoothGatt, type: String, uuid: UUID? = null, start: () -> Boolean): Int = operationGate.run {
         check(gatt === active) { "Queued GATT operation belongs to an expired connection" }
         val result = CompletableDeferred<Int>()
         operation = Operation(active, type, uuid, result)
@@ -330,7 +415,13 @@ class BleClient(private val context: Context, private val onPlaybackCommand: (In
         }
         override fun onServicesDiscovered(active: BluetoothGatt, status: Int) = finish(active, "services", null, status)
         override fun onMtuChanged(active: BluetoothGatt, value: Int, status: Int) {
-            if (active === gatt && status == BluetoothGatt.GATT_SUCCESS) mtu = value.coerceAtLeast(23)
+            if (active === gatt) {
+                logConnection("BLE MTU callback · value $value · status $status")
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    mtu = value.coerceIn(23, 517)
+                    mutableConnection.value = mutableConnection.value.copy(mtu = mtu)
+                }
+            }
             finish(active, "mtu", null, status)
         }
         override fun onDescriptorWrite(active: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) =

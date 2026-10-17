@@ -24,7 +24,8 @@ import com.carcompanion.app.model.*
 import com.carcompanion.app.navigation.MapsNotificationListener
 import com.carcompanion.app.navigation.MockNavigationProvider
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -41,7 +42,12 @@ class CompanionService : Service() {
     private var provider: SpeedLimitProvider = UnknownSpeedLimitProvider()
     private var limit = SpeedLimitState()
     private var limitReceivedElapsedMs = 0L
-    private val artworkQueue = Channel<Artwork?>(Channel.CONFLATED)
+    private val artworkSender = LatestArtworkSender(
+        isCurrent = { art -> ble.connection.value.connected && AppStore.state.value.music.artworkId == art.contentId },
+        publishMetadata = { ble.sendMusic { AppStore.state.value } },
+        transfer = { art -> ble.sendArtwork(art.jpeg, art.contentId) },
+        onFailure = { AppStore.log("Artwork pending reconnect: ${it.javaClass.simpleName}") },
+    )
     private val stateSendMutex = Mutex()
     private val mockNavigation = MockNavigationProvider()
     private var lastLookupElapsedMs = Long.MIN_VALUE
@@ -126,7 +132,8 @@ class CompanionService : Service() {
         scope.launch {
             ble.connection.collect { info ->
                 AppStore.update { it.copy(connection = ConnectionState(info.connected, info.status, info.mtu, info.firmwareVersion)) }
-                if (info.connected) artworkQueue.trySend(AppStore.artwork.value)
+                // Disconnect also cancels the old transfer before a replacement GATT session starts.
+                artworkSender.offer(if (info.connected) AppStore.artwork.value else null)
             }
         }
         scope.launch {
@@ -136,19 +143,15 @@ class CompanionService : Service() {
                 catch (failure: Exception) { AppStore.log("State pending reconnect: ${failure.javaClass.simpleName}") }
             }
         }
-        scope.launch { AppStore.artwork.collect { artworkQueue.trySend(it) } }
         scope.launch {
-            for (art in artworkQueue) {
-                if (art == null || !ble.connection.value.connected || AppStore.state.value.music.artworkId != art.contentId) continue
-                try {
-                    // Metadata first prevents a previous album cover being labeled as the next song.
-                    publishLatestState()
-                    if (AppStore.state.value.music.artworkId != art.contentId) continue
-                    ble.sendArtwork(art.jpeg, art.contentId)
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { AppStore.log("Artwork pending reconnect: ${failure.javaClass.simpleName}") }
+            AppStore.state.map { MusicDeliveryKey.from(it) }.distinctUntilChanged().collect {
+                if (ble.connection.value.connected) try { ble.sendMusic { AppStore.state.value } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { AppStore.log("Music pending reconnect: ${failure.javaClass.simpleName}") }
             }
         }
+        scope.launch { AppStore.artwork.collect { artworkSender.offer(it) } }
+        scope.launch { artworkSender.run() }
         scope.launch {
             MapsNotificationListener.updates.collect { navigation ->
                 if (!demoEnabled) AppStore.navigation(navigation.fresh(SystemClock.elapsedRealtime()))
@@ -197,7 +200,7 @@ class CompanionService : Service() {
 
     private suspend fun publishLatestState() = stateSendMutex.withLock {
         // Sample after acquiring the lock so an older artwork task cannot regress current metadata.
-        ble.sendState(AppStore.state.value)
+        ble.sendState { AppStore.state.value }
     }
 
     private fun applySettings() {

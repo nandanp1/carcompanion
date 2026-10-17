@@ -11,7 +11,7 @@
 | App service stops | Start from the visible app and grant requested permissions. Android force-stop requires user relaunch. OEM battery policies may still terminate the process. |
 | Spotify information absent | Enable notification access for Car Companion, start Spotify playback and inspect Media integration status. The app reads only the Spotify session exposed to Android. |
 | Artwork absent | Confirm artwork exposed by session, JPEG <=32KiB, MTU/chunk diagnostics, status code and free heap. An absent cover is valid. Progressive JPEG is not supported. |
-| Slow artwork at MTU23 | Expected: each packet carries only 8 image bytes. Larger negotiated MTU reduces overhead; there is no throughput guarantee. |
+| Slow artwork at MTU23 | Each packet carries only 8 image bytes; at MTU247 it carries 232. Check the actual negotiated MTU and timed metadata/artwork events in Diagnostics. Obsolete artwork is canceled, song changes take priority, and progress updates are reduced on small links. Larger packets require successful negotiation; the app never assumes 247 after a failed request. |
 | GPS speed shows `—` | Grant precise location, start service from app, enable location, test outdoors; stale/low-accuracy fixes intentionally show unavailable. |
 | Speed limit shows `—` | Default provider is unknown. Configure your valid road-matching endpoint; check confidence, observation timestamp and units. |
 | Maps navigation missing | Open Maps diagnostics. Unsupported notification text cannot supply a reliable turn. Use demo mode to test rendering or implement NavigationProvider for an authorized source. |

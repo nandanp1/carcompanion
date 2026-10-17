@@ -25,5 +25,7 @@ private:
     std::function<void(uint8_t,uint16_t,uint32_t)> status_;
     std::atomic<uint32_t> cached_{0};
     uint32_t expectedCrc_=0;
+    uint64_t transferStartedUs_=0;
+    uint32_t fragments_=0,progressAt_=0;
     bool busy_=false;
 };

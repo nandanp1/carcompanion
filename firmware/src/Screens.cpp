@@ -1,6 +1,7 @@
 #include "Screens.h"
 #include <cstdio>
 #include <cmath>
+#include "esp_log.h"
 LV_FONT_DECLARE(SpeedFont);
 LV_FONT_DECLARE(DashFont);
 namespace {
@@ -64,6 +65,11 @@ lv_obj_t* NavigationScreen::create() {
     return p;
 }
 void NavigationScreen::update(const DisplayState& s,uint64_t now) {
+    const std::string maneuver=s.navigationActive?s.maneuver:"inactive";
+    // Setting line points invalidates the arrow even when unchanged. Only
+    // redraw its geometry when the maneuver changes, not on every speed tick.
+    if(maneuver!=drawnManeuver_) {
+    drawnManeuver_=maneuver;
     std::string symbol="—";
     bool line=false;
     if(s.navigationActive) {
@@ -90,7 +96,9 @@ void NavigationScreen::update(const DisplayState& s,uint64_t now) {
     }
     if(line) { lv_line_set_points(arrowLine_,arrowPoints_,6); lv_obj_remove_flag(arrowLine_,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(arrow_,LV_OBJ_FLAG_HIDDEN); }
     else { lv_obj_add_flag(arrowLine_,LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(arrow_,LV_OBJ_FLAG_HIDDEN); }
-    set(arrow_,symbol); set(distance_,s.navigationActive&&!s.distance.empty()?s.distance:"—");
+    set(arrow_,symbol);
+    }
+    set(distance_,s.navigationActive&&!s.distance.empty()?s.distance:"—");
     set(road_,s.navigationActive?(s.road.empty()?"Instruction unavailable":s.road):"No active route");
     set(eta_,s.navigationActive?s.eta:""); set(speed_,speed(s,now)+" MPH     "+limit(s,now));
     set(status_,s.demo?"DEMO • SIMULATED DATA":s.navigationActive?s.navigationStatus:"Waiting for navigation");
@@ -121,13 +129,24 @@ lv_obj_t* MusicScreen::create(std::function<void(uint8_t)> command) {
     return p;
 }
 void MusicScreen::artwork(const lv_image_dsc_t* image) {
-    if(image) { lv_image_set_src(art_,image); lv_obj_set_pos(art_,(480-image->header.w)/2,56+(240-image->header.h)/2); }
+    if(image) {
+        lv_image_set_src(art_,image); lv_obj_set_pos(art_,(480-image->header.w)/2,56+(240-image->header.h)/2);
+        ESP_LOGI("Music","art attached %ux%u bytes=%lu source_accepted=%u",image->header.w,image->header.h,
+            static_cast<unsigned long>(image->data_size),lv_image_get_src(art_)==image);
+    }
     else { lv_image_set_src(art_,nullptr); lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN); }
 }
 void MusicScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,bool decodedValid) {
     set(title_,s.title); set(artist_,s.artist); set(album_,s.demo?"DEMO • SIMULATED DATA":s.album);
     set(play_,s.playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
     const bool show=decodedValid && s.artworkPresent && s.artworkId==cachedCrc;
+    if(!visibilityLogged_ || loggedPresence_!=s.artworkPresent || loggedDecoded_!=decodedValid ||
+       loggedExpectedCrc_!=s.artworkId || loggedDecodedCrc_!=cachedCrc) {
+        ESP_LOGI("Music","art visible=%u metadata_present=%u expected=%08lx decoded_valid=%u cached=%08lx",show,s.artworkPresent,
+            static_cast<unsigned long>(s.artworkId),decodedValid,static_cast<unsigned long>(cachedCrc));
+        loggedPresence_=s.artworkPresent; loggedDecoded_=decodedValid; loggedExpectedCrc_=s.artworkId;
+        loggedDecodedCrc_=cachedCrc; visibilityLogged_=true;
+    }
     if(show) { lv_obj_remove_flag(art_,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(placeholder_,LV_OBJ_FLAG_HIDDEN); }
     else { lv_obj_add_flag(art_,LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(placeholder_,LV_OBJ_FLAG_HIDDEN); }
     uint64_t position=s.positionMs;

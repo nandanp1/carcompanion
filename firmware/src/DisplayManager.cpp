@@ -14,43 +14,82 @@ void roundArea(lv_event_t* event) {
 }
 }
 bool DisplayManager::flushed(esp_lcd_panel_io_handle_t,esp_lcd_panel_io_event_data_t*,void* context) {
-    lv_display_flush_ready(static_cast<lv_display_t*>(context)); return false;
+    auto* self=static_cast<DisplayManager*>(context);
+    BaseType_t woken=pdFALSE;
+    xSemaphoreGiveFromISR(self->flushDone_,&woken);
+    // With a flush-wait callback LVGL clears its flushing flag after the wait.
+    // Calling flush_ready here as well would leave a stale semaphore token,
+    // allowing the next DMA buffer to be reused before its transfer finishes.
+    return woken==pdTRUE;
+}
+void DisplayManager::waitFlush(lv_display_t* display) {
+    auto* self=static_cast<DisplayManager*>(lv_display_get_user_data(display));
+    ESP_ERROR_CHECK(xSemaphoreTake(self->flushDone_,pdMS_TO_TICKS(1000))==pdTRUE?ESP_OK:ESP_ERR_TIMEOUT);
 }
 void DisplayManager::flush(lv_display_t* display,const lv_area_t* area,uint8_t* data) {
     auto* self=static_cast<DisplayManager*>(lv_display_get_user_data(display));
     const size_t pixels=lv_area_get_width(area)*lv_area_get_height(area);
     lv_draw_sw_rgb565_swap(data,pixels);
     esp_err_t err=esp_lcd_panel_draw_bitmap(self->board_->panel,area->x1,area->y1,area->x2+1,area->y2+1,data);
-    if(err!=ESP_OK) { ESP_LOGE("Display","flush: %s",esp_err_to_name(err)); lv_display_flush_ready(display); }
+    if(err!=ESP_OK) { ESP_LOGE("Display","flush: %s",esp_err_to_name(err)); xSemaphoreGive(self->flushDone_); }
 }
 void DisplayManager::init(Board& board,SettingsManager& settings,std::function<void(uint8_t)> playback) {
     board_=&board; settings_=&settings; pages_=PageNavigation(settings.page()); shown_=pages_.visible();
-    gui_=xSemaphoreCreateMutex(); stateMutex_=xSemaphoreCreateMutex(); assert(gui_ && stateMutex_);
+    gui_=xSemaphoreCreateMutex(); stateMutex_=xSemaphoreCreateMutex(); flushDone_=xSemaphoreCreateBinary();
+    assert(gui_ && stateMutex_ && flushDone_);
     lv_init(); lv_tick_set_cb(tick); lvDisplay_=lv_display_create(480,480);
     lv_display_set_color_format(lvDisplay_,LV_COLOR_FORMAT_RGB565);
-    void* buffer=heap_caps_malloc(480*20*2,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL); assert(buffer);
-    lv_display_set_buffers(lvDisplay_,buffer,nullptr,480*20*2,LV_DISPLAY_RENDER_MODE_PARTIAL);
+    constexpr size_t stripeBytes=480*10*2;
+    auto* buffer=static_cast<uint8_t*>(heap_caps_malloc(stripeBytes*2,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL)); assert(buffer);
+    // Same 19.2 KiB allocation as one 20-line stripe, but render the next
+    // 10-line stripe while DMA transfers the previous one.
+    lv_display_set_buffers(lvDisplay_,buffer,buffer+stripeBytes,stripeBytes,LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_user_data(lvDisplay_,this); lv_display_set_flush_cb(lvDisplay_,flush);
+    lv_display_set_flush_wait_cb(lvDisplay_,waitFlush);
+    lv_timer_set_period(lv_display_get_refr_timer(lvDisplay_),16);
     lv_display_add_event_cb(lvDisplay_,roundArea,LV_EVENT_INVALIDATE_AREA,nullptr);
+    lv_display_add_event_cb(lvDisplay_,renderEvent,LV_EVENT_RENDER_START,this);
+    lv_display_add_event_cb(lvDisplay_,renderEvent,LV_EVENT_RENDER_READY,this);
     esp_lcd_panel_io_callbacks_t cb={}; cb.on_color_trans_done=flushed;
-    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(board.io,&cb,lvDisplay_));
+    ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(board.io,&cb,this));
     screens_[0]=navigation_.create(); screens_[1]=driving_.create(); screens_[2]=music_.create(playback);
     lv_screen_load(screens_[static_cast<int>(shown_)]);
     touch_.init(board,lvDisplay_,[this](int dx,int dy,uint32_t duration) {
-        if(pages_.swipe(dx,dy,duration)) settings_->setPage(pages_.selected());
+        if(pages_.swipe(dx,dy,duration)) { settings_->setPage(pages_.selected()); wake(); }
     });
     board.brightness(settings.brightness());
-    const BaseType_t ok=xTaskCreate(run,"display",6144,this,5,nullptr); assert(ok==pdPASS);
+    const BaseType_t ok=xTaskCreate(run,"display",6144,this,5,&task_); assert(ok==pdPASS);
+    ESP_LOGI("Display","40 MHz QSPI; two 10-line DMA buffers; refresh/input target 16 ms");
+}
+void DisplayManager::wake() {
+    dirty_=true;
+    if(task_) xTaskNotifyGive(task_);
+}
+void DisplayManager::renderEvent(lv_event_t* event) {
+    auto* self=static_cast<DisplayManager*>(lv_event_get_user_data(event));
+    if(lv_event_get_code(event)==LV_EVENT_RENDER_START) self->renderStartedUs_=esp_timer_get_time();
+    else {
+        const uint32_t elapsed=esp_timer_get_time()-self->renderStartedUs_;
+        self->renderTotalUs_+=elapsed; self->renderMaxUs_=std::max(self->renderMaxUs_,elapsed); ++self->renderCount_;
+    }
 }
 void DisplayManager::run(void* ptr) {
     auto* self=static_cast<DisplayManager*>(ptr);
     uint64_t last=0;
     while(true) {
         xSemaphoreTake(self->gui_,portMAX_DELAY);
-        if(millis()-last>=100) { self->refresh(); last=millis(); }
+        if(self->dirty_.exchange(false) || millis()-last>=100) { self->refresh(); last=millis(); }
         const uint32_t delay=lv_timer_handler();
         xSemaphoreGive(self->gui_);
-        vTaskDelay(pdMS_TO_TICKS(std::clamp<uint32_t>(delay,5,20)));
+        const uint64_t now=millis();
+        if(now-self->lastMetricsMs_>=5000) {
+            if(self->renderCount_) ESP_LOGI("Display","rendered=%lu in %llu ms; average=%llu us max=%lu us; heap=%u largest=%u",
+                static_cast<unsigned long>(self->renderCount_),static_cast<unsigned long long>(now-self->lastMetricsMs_),
+                static_cast<unsigned long long>(self->renderTotalUs_/self->renderCount_),static_cast<unsigned long>(self->renderMaxUs_),
+                heap_caps_get_free_size(MALLOC_CAP_8BIT),heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+            self->lastMetricsMs_=now; self->renderCount_=0; self->renderTotalUs_=0; self->renderMaxUs_=0;
+        }
+        ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(std::clamp<uint32_t>(delay,1,16)));
     }
 }
 void DisplayManager::refresh() {
@@ -82,15 +121,17 @@ void DisplayManager::refresh() {
 }
 void DisplayManager::update(const std::function<void(DisplayState&)>& fn) {
     xSemaphoreTake(stateMutex_,portMAX_DELAY); fn(state_); xSemaphoreGive(stateMutex_);
+    wake();
 }
 void DisplayManager::connected(bool value) {
     update([value](DisplayState& s) { s.connected=value; if(!value) { s.gpsValid=false; s.navigationActive=false; s.playing=false; } });
 }
 void DisplayManager::setBrightness(uint8_t value) {
-    requestedBrightness_=value;
+    requestedBrightness_=value; wake();
 }
 void DisplayManager::clock(uint64_t unixSeconds,int offsetMinutes) {
     xSemaphoreTake(stateMutex_,portMAX_DELAY); clockUnix_=unixSeconds; clockAt_=millis(); offsetMinutes_=offsetMinutes; xSemaphoreGive(stateMutex_);
+    wake();
 }
 void DisplayManager::demo(bool enabled) {
     update([enabled](DisplayState& state) { const bool connected=state.connected; state=DisplayState{}; state.connected=connected; state.demo=enabled; });
@@ -99,6 +140,7 @@ void DisplayManager::detachArtwork() {
     xSemaphoreTake(gui_,portMAX_DELAY); music_.artwork(nullptr); cachedCrc_=0; decodedValid_=false;
     if(image_.data) { lv_image_cache_drop(&image_); free(const_cast<uint8_t*>(image_.data)); image_={}; }
     xSemaphoreGive(gui_);
+    wake();
 }
 void DisplayManager::artwork(uint8_t* pixels,uint16_t width,uint16_t height,uint32_t crc) {
     xSemaphoreTake(gui_,portMAX_DELAY);
@@ -106,4 +148,5 @@ void DisplayManager::artwork(uint8_t* pixels,uint16_t width,uint16_t height,uint
     image_.header.w=width; image_.header.h=height; image_.header.stride=width*2;
     image_.data_size=width*height*2; image_.data=pixels; cachedCrc_=crc; decodedValid_=true; music_.artwork(&image_);
     xSemaphoreGive(gui_);
+    wake();
 }

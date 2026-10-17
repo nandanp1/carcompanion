@@ -13,7 +13,7 @@ VERSION = "0.1.0"
 def source_files():
     """Work from either a Git checkout or the extracted release source tree."""
     yield from (ROOT / name for name in (".gitignore", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md"))
-    ignored_directories = {"build", ".gradle", ".idea", "managed_components", "__pycache__"}
+    ignored_directories = {"build", ".gradle", ".kotlin", ".idea", "managed_components", "__pycache__"}
     ignored_files = {".DS_Store", "local.properties", "sdkconfig", "sdkconfig.old", ".env"}
     for directory in (".github", "android", "firmware", "protocol", "docs", "tools"):
         for current, folders, files in os.walk(ROOT / directory):
