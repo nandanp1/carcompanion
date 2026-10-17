@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Fuse-box connection photo placeholder</title>
+  <desc id="desc">A photo of the installed fuse tap and power connection will go here.</desc>
+  <rect width="960" height="480" rx="20" fill="#0c1014"/>
+  <rect x="24" y="24" width="912" height="432" rx="12" fill="none" stroke="#34404b" stroke-width="2" stroke-dasharray="8 10"/>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="480" y="225" fill="#edf2f5" font-size="44">Fuse-box connection</text>
+    <text x="480" y="278" fill="#92a0ac" font-size="28">Photo coming soon</text>
+  </g>
+</svg>

@@ -4,6 +4,10 @@ A small touchscreen display for a 1999 Porsche Boxster 986. It shows speed, Goog
 
 The idea is to put the useful stuff near the rearview mirror, with a simple black screen that feels at home in the car.
 
+![Device photo — coming soon](docs/images/device-placeholder.svg)
+
+<!-- Replace the placeholder above with a photo of the actual display. -->
+
 ## How we got here
 
 We started with a screen and an idea: give an older Boxster a little more information without replacing its dashboard.
@@ -45,6 +49,17 @@ You'll need the **exact Waveshare ESP32-C6-Touch-AMOLED-2.16 board**, an Android
 5. Try Spotify and a Maps route while parked, or use **Demo mode** for sample data.
 
 Once set up, the app can keep the connection running in the background. After Android restarts the app in the background, you may need to open it to resume GPS speed.
+
+## Wiring and installation photos
+
+Photos of the wiring and fuse-box connection will go here as the installation comes together.
+
+| Wiring | Fuse-box connection |
+| --- | --- |
+| ![Wiring photo — coming soon](docs/images/wiring-placeholder.svg) | ![Fuse-box connection photo — coming soon](docs/images/fuse-box-placeholder.svg) |
+| Power wiring and cable routing. | The fuse tap and power connection. |
+
+<!-- Replace these placeholders with actual installation photos and update the image paths. -->
 
 ## A few limits
 
