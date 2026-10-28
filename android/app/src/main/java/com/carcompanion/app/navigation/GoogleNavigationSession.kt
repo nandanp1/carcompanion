@@ -64,7 +64,7 @@ object GoogleNavigationSession : NavigationProvider {
                             if (event.isFinalDestination) stop("You have arrived.", release = false)
                         }.also(nav::addArrivalListener)
                         nav.setAudioGuidanceSettings(AudioGuidanceSettings.builder()
-                            .setGuidanceMode(AudioGuidanceSettings.GuidanceMode.SILENT).build())
+                            .setGuidanceMode(AudioGuidanceSettings.GuidanceMode.VOICE_ALERTS_AND_GUIDANCE).build())
                         acceptingFeed = true
                         current.value = NavigationState(active = true, road = "Starting guidance…",
                             updatedAtElapsedMs = SystemClock.elapsedRealtime(), source = "Google Navigation SDK")
