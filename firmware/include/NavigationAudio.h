@@ -24,7 +24,7 @@ private:
     QueueHandle_t queue_=nullptr;
     std::atomic<uint8_t> volume_{50};
     std::atomic<uint32_t> generation_{0};
-    std::atomic<bool> speaking_{false};
+    std::atomic<bool> speaking_{false}, manualTest_{false};
     bool ready_=false, wasUsable_=false;
     std::string lastStepKey_;
     uint32_t lastStep_=0;

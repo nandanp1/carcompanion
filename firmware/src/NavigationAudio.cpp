@@ -55,7 +55,7 @@ bool NavigationAudio::init(Board& board,uint8_t volume) {
 void NavigationAudio::cancel() { ++generation_; if(queue_) xQueueReset(queue_); }
 void NavigationAudio::setVolume(uint8_t value) {
     volume_=std::min<uint8_t>(value,100);
-    if(!value) cancel();
+    if(!value) { cancel(); manualTest_=false; }
 }
 void NavigationAudio::enqueue(Voice::Prompt prompt) {
     if(!ready_ || !volume_) return;
@@ -64,10 +64,12 @@ void NavigationAudio::enqueue(Voice::Prompt prompt) {
 }
 void NavigationAudio::test() {
     ESP_LOGI("NavAudio","Speaker test requested; ready=%u volume=%u",ready_,volume_.load());
+    if(!ready_ || !volume_ || manualTest_.exchange(true)) return;
     enqueue({Voice::Clip::None,Voice::Clip::Test});
 }
 void NavigationAudio::update(const DisplayState& state,uint64_t now) {
-    if(!ready_) return;
+    // A bench test must not be cancelled by an unknown/stale route snapshot.
+    if(!ready_ || manualTest_) return;
     const bool usable=Voice::Policy::usable(state,now);
     const std::string key=state.maneuver+"\n"+state.road;
     if((wasUsable_ && !usable) || (usable && (key!=lastStepKey_ || state.navigationStep!=lastStep_))) cancel();
@@ -107,10 +109,12 @@ void NavigationAudio::run(void* ptr) {
     for(;;) if(xQueueReceive(self->queue_,&prompt,portMAX_DELAY)==pdTRUE) {
         if(prompt.generation!=self->generation_.load() || !self->volume_) continue;
         self->speaking_=true;
+        ESP_LOGI("NavAudio","Playback started; prompt=%u",unsigned(prompt.maneuver));
         bool complete=self->play(prompt.prefix,prompt.generation) && self->play(prompt.maneuver,prompt.generation);
         // Flush the short DMA tail with silence; never replay the final spoken samples at idle.
         int16_t silence[1024]={}; esp_codec_dev_write(self->codec_,silence,sizeof(silence));
         self->speaking_=false;
+        if(prompt.maneuver==Voice::Clip::Test) self->manualTest_=false;
         ESP_LOGI("NavAudio","prompt=%u complete=%u volume=%u stack_min=%u",unsigned(prompt.maneuver),complete,self->volume_.load(),unsigned(uxTaskGetStackHighWaterMark(nullptr)));
     }
 }
