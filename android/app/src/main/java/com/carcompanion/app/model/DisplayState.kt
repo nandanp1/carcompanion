@@ -93,7 +93,7 @@ data class Diagnostics(
     val locationNeedsForegroundStart: Boolean = false,
     val notificationAccess: Boolean = false,
     val mediaStatus: String = "Enable notification access to read Spotify",
-    val navigationStatus: String = "Waiting for Google Maps notifications",
+    val navigationStatus: String = "Share a destination from Google Maps",
     val gpsStatus: String = "Location service stopped",
     val speedLimitStatus: String = "Unknown provider; speed limit is unavailable",
     val notifications: List<NotificationDiagnostic> = emptyList(),

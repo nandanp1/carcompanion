@@ -1,3 +1,25 @@
+# SDK migration validation — 2026-10-27
+
+Car Companion 0.2.0 replaces live notification parsing with app-owned Navigation SDK guidance. These checks were run locally; they do not establish Google Cloud authorization or live road performance.
+
+| Check | Executed result |
+| --- | --- |
+| Android `testDebugUnitTest assembleDebug lintDebug` with Navigation SDK 8.0.0 | Passed; 129 unit tests, zero failures/errors; lint zero errors and 33 warnings; debug APK generated |
+| New destination parser tests | 10 passed: short-link extraction, place IDs, destination coordinates, viewport rejection, addresses, directions paths, host/redirect validation, multi-stop rejection, invalid coordinates and ambiguous links |
+| New SDK feed mapping tests | 5 passed: structured maneuver/road independence, distance/time formatting, rerouting, stop/unknown state, stale feed, unsupported maneuvers and missing measurements |
+| Firmware host state/protocol and production LVGL render tests | Both passed with existing sanitizer configuration after the navigation header attribution change |
+| Android API 31 emulator APK install | Passed |
+| Shared coordinate destination | Confirmation UI rendered and inspected in a screenshot and UI hierarchy |
+| Location and Nearby devices denial | Both system prompts exercised; app returned a clear retry message without starting a trip |
+| Repeated share into an existing activity | Valid destination replaced by an unsupported URL using `SINGLE_TOP`; old destination cleared and an error shown |
+| Real shortened Maps link, address geocoding, SDK authorization, billing, terms acceptance and live route | Not tested; no physical phone connected, and no navigation terms accepted by the agent |
+| Locked phone, rerouting on the road, arrival, trip replacement while guiding, Spotify audio coexistence and physical BLE guidance | Not tested; see current SDK acceptance checklist in testing.md |
+| Credential handling | Key stored only in ignored local.properties; source/staged-content scan performed before commit; APK contains the build-time key and is not published to GitHub |
+
+The SDK requires AGP 9.0.1 or newer and the NIO flavor of Java desugaring. The build was updated to AGP 9.0.1 and `desugar_jdk_libs_nio:2.1.5`. The BLE wire format remains 1.0. Historical results below concern the previous notification implementation and must not be read as SDK validation.
+
+---
+
 # Executed validation — 2026-10-17
 
 These results describe local builds and tests actually executed for Car Companion 0.1.0 / BLE protocol 1.0. They are not physical hardware certification.

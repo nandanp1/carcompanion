@@ -12,18 +12,22 @@ The idea is to put the useful stuff near the rearview mirror, with a simple blac
 
 We started with a screen and an idea: give an older Boxster a little more information without replacing its dashboard.
 
-First, we needed a source for the driving data. The Waveshare board has no GPS receiver, so the phone supplies its speed. Directions were a separate problem: Google Maps doesn't give other apps a direct feed of its current route. Instead, we read the directions in its Android notifications and send them to the display over Bluetooth.
+First, we needed a source for the driving data. The Waveshare board has no GPS receiver, so the phone supplies its speed. Directions were a separate problem: Google Maps doesn't give other apps a direct feed of its current route. The first version read the directions in its Android notifications and sent them to the display over Bluetooth.
 
 Once the screen, touch controls and Bluetooth worked, we added Spotify. That's where things got messy. Covers didn't always appear, songs took too long to update, and long titles stacked over other text. We fixed the image transfer, made better use of the limited memory and cleaned up the text.
 
 Next came automatic reconnection when the display powers on, album covers on every page, and switching to Navigation when a route starts. Testing on the phone caught a Maps notification format we hadn't handled, so we fixed that too.
 
-This is now running on the actual phone and display. Vehicle testing is still ahead.
+But directions kept glitching in use. Notifications were an unreliable source: Maps could change the text layout, omit fields, or leave an instruction unchanged long enough for our freshness check to clear it. We had built safeguards around missing data, but that still left an inconsistent navigation experience.
+
+We moved navigation to Google’s Navigation SDK. The new flow is **Google Maps → Share → Car Companion → Start navigation**. Maps is still where you find the destination; Car Companion now calculates and owns the trip, receiving structured turns, distances, remaining time, and rerouting updates instead of parsing notification text. The selected Maps route is not copied. Spotify keeps its media-session integration.
+
+The existing artwork and Bluetooth work has been exercised on the actual phone and display. The SDK migration is implemented; its live authorization, shared-link behavior on the phone, and road performance still need physical validation. [The migration story and technical details](docs/navigation-integration.md).
 
 ## What it shows
 
 - **Driving:** speed in mph, time, connection status and a small album cover with the current song.
-- **Navigation:** the next turn, distance, road and arrival time when Maps makes them available, plus speed and the current song.
+- **Navigation:** the next turn, distance, road and remaining trip time from the Navigation SDK, plus speed and the current song.
 - **Music:** a large album cover, title, artist, progress and playback controls.
 
 From Driving, swipe left for Music or right for Navigation. A new route opens Navigation automatically. You can still swipe to another page while navigating.
@@ -31,7 +35,8 @@ From Driving, swipe left for Music or right for Navigation. A new route opens Na
 ```mermaid
 flowchart LR
     GPS[Phone GPS: speed] --> App[Car Companion Android app]
-    Maps[Maps notifications: directions] --> App
+    Maps[Google Maps: share destination] --> SDK[Google Navigation SDK]
+    SDK -->|Structured directions| App
     Spotify[Spotify: music and covers] --> App
     App -->|Bluetooth| Display[Waveshare display]
 ```
@@ -45,8 +50,8 @@ You'll need the **exact Waveshare ESP32-C6-Touch-AMOLED-2.16 board**, an Android
 1. Install the display software using the [hardware guide](docs/hardware-setup.md). Back up its existing firmware first.
 2. Build and install the phone app using the [Android guide](docs/android-setup.md).
 3. Open Car Companion and choose **Connect a display**. Pair through the app.
-4. Allow the requested permissions, including **Car Companion: Maps & media** notification access, then start the companion.
-5. Try Spotify and a Maps route while parked, or use **Demo mode** for sample data.
+4. Allow the requested permissions, including **Car Companion: Spotify media** notification access, then start the companion.
+5. In Maps, share a destination to **Car Companion**, check it, and tap **Start navigation** while parked. Or use **Demo mode** for sample data.
 
 Once set up, the app can keep the connection running in the background. After Android restarts the app in the background, you may need to open it to resume GPS speed.
 
@@ -63,11 +68,11 @@ Photos of the wiring and fuse-box connection will go here as the installation co
 
 ## A few limits
 
-Maps can change what its notifications contain. If an instruction is missing or out of date, the display leaves it unavailable. Speed comes separately from the phone's GPS.
+Navigation needs a Google Cloud project, an authorized Navigation SDK key, and billing. Google’s current policy limits SDK use to commercial applications; eligibility for this personal project needs checking. Shared destinations produce a new driving route, not an exact copy of the Maps trip. Missing or stale guidance stays unavailable. Speed comes separately from the phone's GPS.
 
 Speed limits need a separate road-data service. None is included by default, so the limit shows `—` unless a valid source is configured. [More about speed limits](docs/speed-limits.md).
 
-Artwork, reconnection and navigation switching work on the real devices. Road driving and Android Auto with the Alpine head unit still need testing. See the [recorded results](docs/validation.md).
+Artwork, reconnection and navigation switching work on the real devices. The new SDK route flow and road driving still need testing. This display is intended to replace Android Auto for these tasks. See the [recorded results](docs/validation.md).
 
 ## Inside the repo
 

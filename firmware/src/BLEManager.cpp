@@ -230,7 +230,7 @@ bool BLEManager::json(unsigned channel,const uint8_t* data,size_t count) {
         if(!reliable || std::find(known.begin(),known.end(),maneuver)==known.end()) maneuver="unknown";
         display_.update([=](DisplayState& s) {
             s.navigationActive=active; s.maneuver=maneuver; s.distance=distance; s.road=road; s.eta=eta;
-            s.navigationStatus=reliable?"From phone notification":"Instruction unavailable";
+            s.navigationStatus=reliable?"From phone navigation":"Instruction unavailable";
         }); return true;
     }
     if(channel==3) {

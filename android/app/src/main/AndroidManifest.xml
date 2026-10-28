@@ -17,6 +17,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.CarCompanion" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
+        <meta-data android:name="com.google.android.geo.API_KEY" android:value="${MAPS_API_KEY}" />
+        <activity android:name=".navigation.ShareNavigationActivity" android:exported="true" android:label="Car Companion">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <service android:name=".navigation.NavigationFeedService" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -25,7 +34,7 @@
         </activity>
         <service android:name=".service.CompanionService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice|location" />
         <service android:name=".navigation.MapsNotificationListener" android:exported="true"
-            android:label="Car Companion: Maps &amp; media" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            android:label="Car Companion: Spotify media" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
         <service android:name=".ble.DisplayPresenceService" android:exported="true" android:enabled="@bool/companion_presence_supported" tools:targetApi="31" android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">

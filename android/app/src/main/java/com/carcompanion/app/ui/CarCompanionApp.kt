@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.carcompanion.app.navigation.GoogleNavigationSession
 import com.carcompanion.app.BuildConfig
 import com.carcompanion.app.model.*
 import com.carcompanion.app.service.AutoReconnectSettings
@@ -125,6 +126,13 @@ private fun Overview(state: DisplayState, diagnostics: Diagnostics, artwork: Art
     }
     Text("Swipe the display to change views. Navigation takes the lead when a route starts.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
     CardBlock {
+        Text("Google Maps navigation", fontWeight = FontWeight.Medium)
+        Text(diagnostics.navigationStatus, color = Muted, fontSize = 12.sp)
+        Text("In Google Maps, open your destination and choose Share → Car Companion. Confirm the destination to start driving directions.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+        if (!state.demo) TextButton(onClick = { GoogleNavigationSession.stop() }) { Text("Stop navigation") }
+        Text("Google Maps", color = Color.White, fontSize = 12.sp)
+    }
+    CardBlock {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(if (diagnostics.serviceRunning) "Ready for the road" else "Your drive, in focus", fontSize = 18.sp, fontWeight = FontWeight.Medium)
@@ -200,7 +208,8 @@ fun DisplayPreview(state: DisplayState, artwork: Artwork?, modifier: Modifier = 
                             Maneuver.LEFT -> "←"; Maneuver.RIGHT -> "→"; Maneuver.STRAIGHT -> "↑"; Maneuver.SLIGHT_LEFT -> "↖"; Maneuver.SLIGHT_RIGHT -> "↗"; Maneuver.U_TURN -> "↶"; Maneuver.ROUNDABOUT -> "⟳"; Maneuver.ARRIVE -> "⚑"; else -> "—"
                         }, color = Blue, fontSize = (75 * scale).sp, lineHeight = (86 * scale).sp)
                         Text(state.navigation.distanceText.ifBlank { if (state.navigation.active) "Instruction unavailable" else "No active route" }, fontSize = (25 * scale).sp, fontWeight = FontWeight.Medium)
-                        Text(state.navigation.road.ifBlank { if (state.navigation.active) "Check Google Maps" else "Start navigation in Google Maps" }, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = (13 * scale).sp, modifier = Modifier.padding(top = 8.dp))
+                        Text(state.navigation.road.ifBlank { if (state.navigation.active) "Check Car Companion" else "Share a Maps destination" }, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = (13 * scale).sp, modifier = Modifier.padding(top = 8.dp))
+                        if (state.navigation.active && !state.demo) Text("Google Maps", color = Color.White, fontSize = 12.sp)
                         Spacer(Modifier.weight(1f))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("${state.driving.speedMph?.takeIf { state.driving.speedAgeMs < 3000 }?.roundToInt() ?: "—"} mph", fontSize = (17 * scale).sp)
@@ -308,9 +317,9 @@ private fun Setup(state: DisplayState, diagnostics: Diagnostics, onPair: () -> U
         StatusRow("Nearby devices & GPS", diagnostics.gpsStatus)
         TextButton(onClick = onPermissions) { Text("Review permissions") }
         HorizontalDivider(color = Line, modifier = Modifier.padding(vertical = 8.dp))
-        StatusRow("Spotify & Google Maps", if (diagnostics.notificationAccess) "Notification access enabled" else "Notification access required")
+        StatusRow("Spotify", if (diagnostics.notificationAccess) "Notification access enabled" else "Notification access required")
         TextButton(onClick = onNotificationAccess) { Text("Open notification access") }
-        Text("Only Google Maps navigation notifications and active Spotify media sessions are used. Audio continues through your Alpine head unit.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+        Text("Notification access is used only for Spotify media sessions. Directions come directly from Google’s Navigation SDK.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
     }
     Label("03  /  DISPLAY PREFERENCES")
     CardBlock {
@@ -356,24 +365,6 @@ private fun Setup(state: DisplayState, diagnostics: Diagnostics, onPair: () -> U
         StatusRow("Google Maps", diagnostics.navigationStatus)
         StatusRow("Speed limit", diagnostics.speedLimitStatus)
         StatusRow("Limit confidence / age", "${(state.driving.speedLimit.confidence * 100).roundToInt()}% / ${if (state.driving.speedLimit.ageMs == Long.MAX_VALUE) "—" else "${state.driving.speedLimit.ageMs / 1000}s"}")
-    }
-    Label("MAPS NOTIFICATION INSPECTOR")
-    Text("Google Maps has no public active-navigation API. These are the fields actually exposed by notifications on this phone; missing directions stay unavailable.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
-    if (diagnostics.notifications.isEmpty()) CardBlock { Text("Start a Google Maps route after enabling notification access to inspect its fields.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp) }
-    diagnostics.notifications.take(6).forEach { notification ->
-        CardBlock {
-            Text(notification.title.ifBlank { "(No title)" }, fontSize = 14.sp)
-            Text("Category: ${notification.category.ifBlank { "(Not supplied)" }}", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
-            Text(notification.text.ifBlank { "(No text)" }, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            if (notification.bigText.isNotBlank()) {
-                Text("Expanded: ${notification.bigText}", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            }
-            if (notification.subText.isNotBlank()) {
-                Text("Subtitle: ${notification.subText}", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            }
-            Text(notification.result, color = Blue, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-            Text("Fields: ${notification.extraKeys.joinToString()}", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
-        }
     }
     Label("RECENT EVENTS")
     CardBlock {

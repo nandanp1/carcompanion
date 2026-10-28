@@ -98,7 +98,7 @@ void DrivingScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc
     nowPlaying_.update(s,cachedCrc,decodedValid);
 }
 lv_obj_t* NavigationScreen::create() {
-    auto* p=page(); status_=singleLineLabel(p,"NAVIGATION",90,39,300,&lv_font_montserrat_16,Blue);
+    auto* p=page(); status_=singleLineLabel(p,"NAVIGATION",90,39,300,&lv_font_montserrat_16);
     arrow_=label(p,"—",150,91,180,&lv_font_montserrat_48,Blue);
     arrowLine_=lv_line_create(p); lv_obj_set_pos(arrowLine_,180,78);
     lv_obj_set_style_line_color(arrowLine_,lv_color_hex(Blue),0);
@@ -150,7 +150,7 @@ void NavigationScreen::update(const DisplayState& s,uint64_t now,uint32_t cached
     setMetadata(distance_,s.navigationActive&&!s.distance.empty()?s.distance:"—",distanceText_);
     setMetadata(road_,s.navigationActive?(s.road.empty()?"Instruction unavailable":s.road):"No active route",roadText_);
     setMetadata(eta_,s.navigationActive?s.eta:"",etaText_); set(speed_,speed(s,now)+" MPH     "+limit(s,now));
-    set(status_,s.demo?"DEMO NAVIGATION":s.navigationActive && s.navigationStatus=="Instruction unavailable"?"CHECK PHONE NAVIGATION":"NAVIGATION");
+    set(status_,s.demo?"DEMO NAVIGATION":s.navigationActive?"Google Maps":"NAVIGATION");
     nowPlaying_.update(s,cachedCrc,decodedValid);
 }
 lv_obj_t* MusicScreen::create(std::function<void(uint8_t)> command) {

@@ -14,7 +14,9 @@
 | Slow artwork at MTU23 | Each packet carries only 8 image bytes; at MTU247 it carries 232. Check the actual negotiated MTU and timed metadata/artwork events in Diagnostics. Obsolete artwork is canceled, song changes take priority, and progress updates are reduced on small links. Larger packets require successful negotiation; the app never assumes 247 after a failed request. |
 | GPS speed shows `—` | Grant precise location, start service from app, enable location, test outdoors; stale/low-accuracy fixes intentionally show unavailable. |
 | Speed limit shows `—` | Default provider is unknown. Configure your valid road-matching endpoint; check confidence, observation timestamp and units. |
-| Maps navigation missing | Open Maps diagnostics. Unsupported notification text cannot supply a reliable turn. Use demo mode to test rendering or implement NavigationProvider for an authorized source. |
+| Navigation missing | Share a destination from Google Maps to Car Companion, confirm it, then tap Start navigation. Check Diagnostics → Google Maps for SDK authorization, routing, or location errors. Starting a trip only in the separate Maps app no longer drives the display. |
+| Google rejects the API key | Enable Navigation SDK and billing in the key’s Google Cloud project; check Android package `com.carcompanion.app` and signing SHA-1 restrictions. |
+| Shared link does not resolve | Share the place itself or a full Maps URL with destination coordinates/address. Unsupported redirects, country-specific domains, and multi-stop links are rejected. |
 | Touch swipes do nothing | Use deliberate horizontal movement; minor/vertical movement is ignored. Check touch coordinates in board bring-up before changing gestures. |
 | Old-looking speed after reconnect | Verify firmware build/protocol match and state age; live firmware must age source timestamps and clear disconnected speed. Report if a number persists beyond the documented timeout. |
 | Wrong colors in art/panel | Compare panel RGB order, JPEG RGB565 format and DMA byte swapping; use exact board configuration. Do not randomly swap pins. |

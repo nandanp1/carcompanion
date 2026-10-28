@@ -1,43 +1,69 @@
-# Navigation integration: verified APIs and experimental formats
+# Navigation: from notification parsing to the Google SDK
 
-Car Companion uses Android's public notification listener, with the owner's explicit Notification access grant. It reads only Google Maps (`com.google.android.apps.maps`) navigation candidates. It does not use AccessibilityService, Android Auto private APIs, audio capture, screen capture, or Google Maps internal storage.
+## Why we changed it
 
-## What is verified
+The first version listened to Google Maps' ongoing Android notification. It was a convenient way to keep using Maps normally and forward the text to a small display. It also let us prove the Bluetooth connection, automatic page switching, and navigation layout before building a navigation app.
 
-Android documents notification listener callbacks, active notification enumeration, and removal notifications. A notification may expose public title, text, expanded text, subtitle, and a navigation category. These are Android features, **not a Google Maps navigation-data API**:
+In practice, the owner reported that directions kept glitching. The notification was a presentation surface, not a navigation-data contract. Our parser had to guess which public text fields contained the instruction, distance, road, and arrival time. One observed Maps version combined distance and instruction into a title such as `350 ft · Keep right to stay on Sample Rd`, left the normal text field empty, and put arrival time in the subtitle. That needed a parser fix. Icons alone could not provide a trustworthy maneuver.
 
-- [NotificationListenerService](https://developer.android.com/reference/android/service/notification/NotificationListenerService)
-- [Notification fields and categories](https://developer.android.com/reference/android/app/Notification)
-- [MediaSessionManager access through an enabled notification listener](https://developer.android.com/reference/android/media/session/MediaSessionManager#getActiveSessions(android.content.ComponentName))
+There was also a mismatch between notification updates and our freshness rules. An unchanged notification could keep the route present while the app deliberately cleared instruction fields after 30 seconds. Notification removal/replacement needed a grace period; listener disconnects and missing route evidence could end navigation. These are concrete weaknesses in the old implementation, not a claim that we diagnosed every glitch on the road. Patching individual formats did not make notifications a stable turn-by-turn feed.
 
-The Google Navigation SDK is an integration for navigation owned by the integrating application. It does not expose another installed Google Maps application's active route. It also has its own setup, terms, and billing: [Navigation SDK overview](https://developers.google.com/maps/documentation/navigation/android-sdk/overview).
+The display is now intended to replace the Android Auto screen for music and simple directions. That makes owning the navigation session in Car Companion a better fit than trying to observe another app's session.
 
-A real ongoing Google Maps notification was inspected on a Pixel 9 Pro XL / Android 17 with Maps 26.41.04.993332563. It used the `navigation` category and `Notification.ProgressStyle`, with a combined title shaped like `350\u00a0ft · Keep right to stay on Sample Rd`, empty text, and a subtitle shaped like `Arrive 1:31 PM`. The street is replaced here to avoid publishing location data. Regression fixtures preserve that observed structure with synthetic road names. Other grammar fixtures remain synthetic; this observation does not establish support for every Maps version or locale.
+## The new flow
 
-## Supported notification text
+1. In Google Maps, open a destination and choose **Share → Car Companion**.
+2. The app resolves the link and shows the destination. If address lookup produces several matches, choose the correct one.
+3. Tap **Start navigation**, grant precise location/Nearby devices permissions, and accept Google's SDK terms on first use.
+4. Car Companion starts its foreground service and asks Navigation SDK 8.0.0 for a driving route from the phone's current location.
+5. The SDK sends structured turn-by-turn updates to `NavigationFeedService`. `GoogleNavigationSession` publishes a `NavigationState`; the existing companion service sends it over BLE.
+6. **Stop navigation**, arrival, or **Stop companion** clears the route. Starting demo mode stops the real trip.
 
-The parser requires an ongoing Google Maps notification with Android's navigation category, or both an explicit recognized instruction and a maneuver distance. Supported English instruction prefixes include `Turn left`, `Turn right`, `Turn slight left/right`, `Keep left/right`, `Continue on/straight`, cardinal `Head` directions, `Make a U-turn`, and explicit roundabout instructions. An optional `In 500 ft,` prefix is supported. The observed distance-plus-middle-dot title prefix is also supported; Unicode spacing such as nonbreaking spaces is normalized before parsing. Only a complete recognized distance may be stripped before the middle dot.
+The share transfers a destination, not Maps' active trip. The SDK can choose a different route. Multi-stop links are rejected rather than silently dropping stops. Only a single driving destination is supported.
 
-The maneuver is extracted exclusively from the instruction phrase. Words in a road name never determine direction. A street is shown only when an instruction explicitly uses `onto`, `on`, or `toward`. Distances recognize miles, feet, kilometers, and meters. A supplied time or duration can be retained; arrival times and traffic estimates are never calculated from incomplete notification text.
+```mermaid
+flowchart LR
+    Maps[Google Maps: share destination] --> Resolve[Resolve and confirm destination]
+    Resolve --> SDK[Google Navigation SDK: app-owned trip]
+    SDK --> Feed[Structured maneuvers, distance and remaining time]
+    Feed --> Companion[Car Companion]
+    Spotify[Spotify MediaSession: music and artwork] --> Companion
+    Companion -->|BLE| Display[ESP32 display]
+```
 
-A category-only notification may activate the navigation page but shows unavailable instruction fields. An arrow represented only by an icon is **not** interpreted. Unsupported locales, custom layouts, redacted notifications, OEM differences, and future Maps formatting can therefore show no turn arrow. No speed limit is read or inferred from Maps notifications.
+## What is implemented
 
-A detected active route automatically opens Navigation on the phone preview and display. Later updates preserve a manual page choice; confirmed route end restores the selection from before the route. While the companion service runs, the listener checks active Maps notifications every five seconds. Route presence and instruction age are separate: an unchanged notification keeps the route active, while maneuver/distance/road/ETA older than 30 seconds become unavailable. Notification removal gets a 250 ms grace period to reconcile replacement notifications before ending the route. If presence cannot be confirmed for 30 seconds or notification access disconnects, navigation ends. The diagnostics screen distinguishes a present route with stale instructions from missing route evidence.
+- Android `ACTION_SEND` handling for `text/plain` Maps shares.
+- Bounded HTTPS short-link resolution, with an allowlist checked at every redirect. No API key is sent to shared URLs; page HTML is not scraped.
+- Destination place IDs, explicit destination/query coordinates, single destination paths, and address lookup through Android's Geocoder. Map camera coordinates (`@lat,lng`) are never treated as a destination.
+- A destination confirmation screen, including candidate selection for ambiguous addresses.
+- SDK initialization and authorization errors surfaced to the user, with no automatic notification fallback.
+- Structured maneuver mapping, imperial distance formatting, remaining trip duration, rerouting state, and stale-feed clearing after 30 seconds.
+- Foreground navigation, arrival handling, trip replacement, and explicit stop. Late route-result callbacks are ignored after cancellation.
+- Existing BLE protocol and page switching preserved. The firmware's navigation header now attributes active Google guidance to Google Maps.
 
-## On-device diagnosis
+The SDK guidance feed is documented to update about once per second. This removes reliance on Maps' notification wording or update schedule; it does not eliminate GPS, network, permission, or Android process-lifetime failures. Routes are not automatically restored after process death. Share the destination again to restart a trip.
 
-1. Grant Notification access in Android settings and start Car Companion while parked.
-2. Start a real Google Maps route. Open Car Companion's Maps diagnostics.
-3. Check the captured category, public title/text, available extra names, and parser result. History is limited to 12 Maps notifications in memory and is not uploaded or persisted.
-4. Verify the direction, road, and distance against the phone for several maneuvers. Repeat with Android Auto active and for each Maps update or locale.
-5. If text does not contain a reliable instruction, keep the dashboard/music view or use an app-owned navigation integration. Do not add speculative mappings based on icons or destinations.
+## Spotify still uses notification access
 
-## Functional alternatives
+Android grants access to other apps' active media sessions through an enabled notification listener. The original listener component name is retained so existing users keep their permission grant, but it no longer inspects notification contents, polls Maps, or publishes navigation. Its Settings label is now **Car Companion: Spotify media**. The old parser and its regression tests remain as historical, unused code.
 
-`MockNavigationProvider` emits clearly labeled synthetic routes for bench testing. The foreground service's **Demo** control exercises route activation, changes, end, and page restoration. Both phone and device mark simulated data as DEMO; disable this before driving.
+## Setup, privacy, and limits
 
-`NavigationProvider` exposes a `StateFlow<NavigationState>`. `StructuredNavigationProvider.submit()` is a validated in-process integration interface for an authorized navigation SDK that owns its route. To integrate it, collect that provider in `CompanionService` where `MapsNotificationListener.updates` is currently collected. Supply monotonic `updatedAtElapsedMs` on each update and `active=false` at route end. This is an integration seam, not a preconfigured third-party navigation subscription or an exported unauthenticated broadcast receiver.
+See [Android setup](android-setup.md) for the API key, billing, and Android package/signing restrictions. Credentials belong in ignored `android/local.properties` or a build environment variable, never in Git. An Android API key is embedded in the installed APK; package/certificate restrictions are important.
 
-## Android Auto coexistence
+Short links are resolved with Google. Address lookup uses the phone's geocoding provider. The Navigation SDK receives the destination and location needed to navigate. The app keeps the active destination and feed in process memory and does not write route history or shared links to its diagnostic log.
 
-Media session observation and navigation notification observation do not request audio focus or alter audio routing. BLE uses the custom GATT service only. The app is designed to coexist with wired or wireless Android Auto; concurrent RF performance, OEM power management, Maps notification contents, and Alpine behavior require the manual hardware checklist. No Android Auto compatibility certification or physical coexistence test is claimed.
+Google's current [Navigation SDK policies](https://developers.google.com/maps/documentation/navigation/android-sdk/policies) state that the SDK is allowed only for commercial applications. This repository is a personal enthusiast project: eligibility for actual use must be resolved with Google; an API key or a successful build does not establish permission. Billing and SDK enablement also cannot be inferred from possession of a key.
+
+Unsupported shortened-link redirects, country-specific Maps domains, unavailable geocoding, and ambiguous places can require sharing a pinned place or a supported full Maps URL. Location must be precise. Navigation can continue while the display reconnects, but phone lock, permission revocation, service restarts, real driving, voice/music interaction, and arrival all still need physical acceptance tests.
+
+## Sources
+
+- [Navigation SDK setup and requirements](https://developers.google.com/maps/documentation/navigation/android-sdk/setup-overview)
+- [App-owned destination routing](https://developers.google.com/maps/documentation/navigation/android-sdk/route)
+- [Structured turn-by-turn feed for external displays](https://developers.google.com/maps/documentation/navigation/android-sdk/tbt-feed)
+- [Policies and attribution](https://developers.google.com/maps/documentation/navigation/android-sdk/policies)
+- [Original notification-listener API](https://developer.android.com/reference/android/service/notification/NotificationListenerService)
+
+Automated checks and physical validation are recorded separately in [validation.md](validation.md).

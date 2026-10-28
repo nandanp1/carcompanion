@@ -35,7 +35,22 @@ ctest --test-dir .cache/firmware-layout-tests --output-on-failure
 
 These render the production screens with the production fonts. They check long title/artist/album row bounds, ellipsis, embedded line breaks, artwork visibility/CRC behavior and deferred DMA-style flushing. Repeated unchanged long metadata must produce zero extra flushes. Address/undefined sanitizers are enabled by default; Clang's function-pointer type check is excluded for LVGL's existing generic callback convention, while the other checks remain enabled.
 
-## Physical acceptance checklist
+## SDK migration acceptance checklist
+
+The notification/Android Auto rows in the historical checklist below describe the previous implementation. For the SDK migration, run these checks on the actual phone and display; passing unit tests does not establish that the key is authorized or that live navigation works.
+
+- Share a real `maps.app.goo.gl` place link and confirm the destination is correct.
+- Share coordinates, a place ID link, an address, and an ambiguous place name. Confirm candidate selection and reject unsupported/multi-stop links.
+- Deny precise location, then grant it on retry; decline Google’s terms, then retry; test offline and unauthorized-key errors.
+- Start guidance with Spotify playing; verify maneuver, distance, road, and remaining time on both phone and display.
+- Drive past a turn to trigger rerouting. The old arrow clears until a new step arrives.
+- Lock the phone; disconnect/reconnect the display; verify fresh directions and artwork return.
+- Share a replacement destination, stop while routing is pending, arrive, and use Stop navigation. No old route should resume.
+- Enable demo during a real trip; real navigation stops. Disable demo; no real trip resumes automatically.
+- Stop companion and restart; no old guidance should return. Kill the process; a new trip requires another share.
+- Revoke Spotify notification access during navigation. Directions remain independent; Spotify reports missing permission.
+
+## Physical acceptance checklist (pre-SDK history)
 
 Perform interactions while parked, then have a passenger observe any driving checks. Record firmware and protocol builds before testing.
 

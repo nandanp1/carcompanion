@@ -16,6 +16,7 @@ The root MIT license covers new Car Companion code. It does not replace upstream
 | AndroidX / Jetpack Compose | Pinned in Gradle | Apache-2.0 and package notices |
 | Kotlin / coroutines | Pinned in Gradle | Apache-2.0 |
 | Gradle wrapper | 9.3.1 | Apache-2.0 |
+| Google Navigation SDK | 8.0.0 | [Google Maps Platform terms and SDK policies](https://developers.google.com/maps/documentation/navigation/android-sdk/policies); not covered by MIT; current policy limits use to commercial applications |
 | Google Play Services Location | 21.3.0 | Google Android SDK/Play Services terms; not covered by this project's MIT license |
 
 ESP-IDF and Android dependencies are downloaded by their build systems, not relicensed by this repository. Keep all corresponding notices when redistributing binary packages. Review dependency changes before a release, especially if substituting vendor BSP code or fonts.

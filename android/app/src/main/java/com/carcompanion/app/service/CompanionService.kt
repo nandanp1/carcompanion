@@ -25,13 +25,15 @@ import com.carcompanion.app.media.SpotifyMediaMonitor
 import com.carcompanion.app.model.*
 import com.carcompanion.app.navigation.MapsNotificationListener
 import com.carcompanion.app.navigation.MockNavigationProvider
+import com.carcompanion.app.navigation.GoogleNavigationSession
+import com.carcompanion.app.navigation.SharedMapsDestination
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Started from visible onboarding. BLE and GPS remain alive while Android Auto owns its audio. */
+/** Keeps BLE, GPS and app-owned navigation running after a visible user start. */
 class CompanionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
@@ -116,6 +118,17 @@ class CompanionService : Service() {
         }
         refreshGps()
         when (intent?.action) {
+            ACTION_NAVIGATE -> {
+                if (demoEnabled) setDemo(false)
+                val destination = SharedMapsDestination(
+                    intent.getStringExtra("destination_label").orEmpty().take(200),
+                    intent.getDoubleExtra("destination_lat", Double.NaN).takeIf { it.isFinite() && it in -90.0..90.0 },
+                    intent.getDoubleExtra("destination_lng", Double.NaN).takeIf { it.isFinite() && it in -180.0..180.0 },
+                    intent.getStringExtra("destination_place_id"),
+                )
+                if (granted(Manifest.permission.ACCESS_FINE_LOCATION)) GoogleNavigationSession.start(this, destination)
+                else AppStore.diagnostic { it.copy(navigationStatus = "Allow precise location, then share the destination again.") }
+            }
             ACTION_SETTINGS -> applySettings()
             ACTION_DEMO -> setDemo(intent.getBooleanExtra(EXTRA_ENABLED, false))
         }
@@ -192,7 +205,7 @@ class CompanionService : Service() {
         scope.launch { AppStore.artwork.collect { artworkSender.offer(it) } }
         scope.launch { artworkSender.run() }
         scope.launch {
-            MapsNotificationListener.updates.collect { navigation ->
+            GoogleNavigationSession.updates.collect { navigation ->
                 if (!demoEnabled) AppStore.navigation(navigation.fresh(SystemClock.elapsedRealtime()))
             }
         }
@@ -227,7 +240,7 @@ class CompanionService : Service() {
                         else (limit.ageMs + (now - limitReceivedElapsedMs)).coerceAtLeast(0))
                     val driving = SpeedPolicy.resolve(gps.samples.value, now, agedLimit)
                     AppStore.update { it.copy(driving = driving, timeEpochSeconds = System.currentTimeMillis() / 1000) }
-                    AppStore.navigation(MapsNotificationListener.updates.value.fresh(now))
+                    AppStore.navigation(GoogleNavigationSession.updates.value.fresh(now))
                     if (driving.speedMph == null && gps.samples.value != null && driving.speedAgeMs >= SpeedPolicy.STALE_AFTER_MS) {
                         AppStore.diagnostic { it.copy(gpsStatus = "GPS is stale · speed unavailable") }
                     }
@@ -281,6 +294,7 @@ class CompanionService : Service() {
         // Clear synthetic/live values atomically with the mode bit before any BLE observer resumes.
         AppStore.update { it.copy(demo = enabled, driving = DrivingState(), music = MusicState()) }
         if (enabled) {
+            GoogleNavigationSession.stop("Demo mode · real navigation stopped")
             gps.stop(); media.stop(); lookupJob?.cancel()
             AppStore.artwork(null)
             demoTick = 0
@@ -297,7 +311,7 @@ class CompanionService : Service() {
             AppStore.diagnostic { it.copy(gpsStatus = "DEMO · simulated speed", mediaStatus = "DEMO · simulated media", navigationStatus = "DEMO · synthetic navigation") }
         } else {
             AppStore.artwork(null)
-            AppStore.navigation(MapsNotificationListener.updates.value.fresh(SystemClock.elapsedRealtime()))
+            AppStore.navigation(GoogleNavigationSession.updates.value.fresh(SystemClock.elapsedRealtime()))
             AppStore.update { it.copy(driving = DrivingState(), music = MusicState()) }
             refreshGps()
             media.start()
@@ -322,6 +336,7 @@ class CompanionService : Service() {
     private fun granted(permission: String) = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
+        GoogleNavigationSession.stop()
         if (initialized) { ble.close(); gps.stop(); media.stop() }
         scope.cancel()
         AppStore.update { it.copy(connection = ConnectionState(), driving = DrivingState(), music = MusicState(), demo = false) }
@@ -334,6 +349,7 @@ class CompanionService : Service() {
 
     companion object {
         const val PREFS = "car_companion"
+        const val ACTION_NAVIGATE = "com.carcompanion.NAVIGATE"
         const val ACTION_STOP = "com.carcompanion.STOP"
         const val ACTION_SETTINGS = "com.carcompanion.SETTINGS"
         const val ACTION_DEMO = "com.carcompanion.DEMO"
@@ -342,6 +358,12 @@ class CompanionService : Service() {
         const val EXTRA_ENABLED = "enabled"
         private const val CHANNEL = "car_companion_connection"
         private const val NOTIFICATION_ID = 986
+        fun navigate(context: Context, destination: SharedMapsDestination) = send(context,
+            Intent(context, CompanionService::class.java).setAction(ACTION_NAVIGATE)
+                .putExtra("destination_label", destination.label)
+                .putExtra("destination_lat", destination.latitude ?: Double.NaN)
+                .putExtra("destination_lng", destination.longitude ?: Double.NaN)
+                .putExtra("destination_place_id", destination.placeId))
         fun start(context: Context, address: String? = null) = send(context, Intent(context, CompanionService::class.java).putExtra(EXTRA_ADDRESS, address))
         fun resumeBle(context: Context, address: String) = send(context,
             Intent(context, CompanionService::class.java).setAction(ACTION_RESUME_BLE).putExtra(EXTRA_ADDRESS, address))

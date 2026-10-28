@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-/** Process-local state, never exports notifications or location history to a cloud service. */
+/** Process-local UI state. Navigation SDK networking is owned by the navigation provider. */
 object AppStore {
     private val mutableState = MutableStateFlow(DisplayState())
     val state: StateFlow<DisplayState> = mutableState.asStateFlow()
