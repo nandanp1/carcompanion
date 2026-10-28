@@ -24,6 +24,8 @@ bool NavigationAudio::init(Board& board,uint8_t volume) {
     config.gpio_cfg.ws=GPIO_NUM_22; config.gpio_cfg.dout=GPIO_NUM_23;
     config.gpio_cfg.din=I2S_GPIO_UNUSED;
     if(i2s_channel_init_std_mode(tx,&config)!=ESP_OK) return false;
+    // Vendor initialization starts clocks before programming the slave codec.
+    if(i2s_channel_enable(tx)!=ESP_OK) return false;
     audio_codec_i2s_cfg_t dataCfg={}; dataCfg.port=0; dataCfg.tx_handle=tx;
     const auto* data=audio_codec_new_i2s_data(&dataCfg);
     audio_codec_i2c_cfg_t ctrlCfg={}; ctrlCfg.port=0; ctrlCfg.addr=ES8311_CODEC_DEFAULT_ADDR;
@@ -60,7 +62,10 @@ void NavigationAudio::enqueue(Voice::Prompt prompt) {
     prompt.generation=++generation_;
     xQueueOverwrite(queue_,&prompt);
 }
-void NavigationAudio::test() { enqueue({Voice::Clip::None,Voice::Clip::Test}); }
+void NavigationAudio::test() {
+    ESP_LOGI("NavAudio","Speaker test requested; ready=%u volume=%u",ready_,volume_.load());
+    enqueue({Voice::Clip::None,Voice::Clip::Test});
+}
 void NavigationAudio::update(const DisplayState& state,uint64_t now) {
     if(!ready_) return;
     const bool usable=Voice::Policy::usable(state,now);

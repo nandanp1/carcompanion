@@ -89,8 +89,8 @@ void Board::brightness(uint8_t percent) {
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io,0x02005100,&value,1));
 }
 
-bool Board::volumeDownPressed() const { return gpio_get_level(GPIO_NUM_9)==0; }
-bool Board::volumeUpPressed() const { return gpio_get_level(GPIO_NUM_10)==0; }
+bool Board::volumeDownPressed() const { return gpio_get_level(GPIO_NUM_10)==0; }
+bool Board::volumeUpPressed() const { return gpio_get_level(GPIO_NUM_9)==0; }
 bool Board::powerShortPress() {
     // Read/clear only the PKEY_SHORT W1C bit. Failed I2C reads are never button presses.
     uint8_t irq=0;
