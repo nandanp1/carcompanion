@@ -11,11 +11,12 @@ import org.junit.Test
 class SdkNavigationMapperTest {
     @Test fun mapsStructuredTurnWithoutReadingRoadWords() {
         val info = NavInfo.builder().setNavState(NavState.ENROUTE)
-            .setCurrentStep(StepInfo.builder().setManeuver(GoogleManeuver.TURN_RIGHT).setFullRoadName("Left Lane").build())
+            .setCurrentStep(StepInfo.builder().setManeuver(GoogleManeuver.TURN_RIGHT).setFullRoadName("Left Lane").setStepNumber(4).build())
             .setDistanceToCurrentStepMeters(100).setTimeToFinalDestinationSeconds(601).build()
         val state = SdkNavigationMapper.map(info, 1_000)
         assertEquals(Maneuver.RIGHT, state.maneuver)
         assertEquals("Left Lane", state.road)
+        assertEquals(5L, state.stepId)
         assertEquals("330 ft", state.distanceText)
         assertEquals("11 min", state.etaText)
         assertTrue(state.active)

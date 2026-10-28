@@ -130,6 +130,7 @@ private fun Overview(state: DisplayState, diagnostics: Diagnostics, artwork: Art
         Text(diagnostics.navigationStatus, color = Muted, fontSize = 12.sp)
         Text("In Google Maps, open your destination and choose Share → Car Companion. Confirm the destination to start driving directions.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
         if (!state.demo) TextButton(onClick = { GoogleNavigationSession.stop() }) { Text("Stop navigation") }
+        Text("Voice guidance plays on the display speaker. Use its physical buttons to adjust volume.", color = Muted, fontSize = 12.sp)
         Text("Google Maps", color = Color.White, fontSize = 12.sp)
     }
     CardBlock {

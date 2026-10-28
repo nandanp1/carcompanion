@@ -141,7 +141,7 @@ int BLEManager::gap(ble_gap_event* event,void* arg) {
     return 0;
 }
 void BLEManager::hello(uint8_t* out) {
-    memset(out,0,16); out[0]=1; out[1]=1; Protocol::put16(out+6,32); Protocol::put32(out+8,1); Protocol::put32(out+12,artwork_.cachedCrc());
+    memset(out,0,16); out[0]=1; out[1]=1; Protocol::put16(out+6,32); Protocol::put32(out+8,3); Protocol::put32(out+12,artwork_.cachedCrc());
 }
 void BLEManager::status(uint8_t event,uint8_t code,uint16_t id,uint32_t offset) {
     const uint16_t conn=connectionHandle_.load(); if(conn==BLE_HS_CONN_HANDLE_NONE || !encrypted_) return;
@@ -228,7 +228,11 @@ bool BLEManager::json(unsigned channel,const uint8_t* data,size_t count) {
            !textField(r,"source",source,96)) return false;
         const std::array<std::string,10> known={"unknown","straight","left","right","slight_left","slight_right","uturn","roundabout","arrive",""};
         if(!reliable || std::find(known.begin(),known.end(),maneuver)==known.end()) maneuver="unknown";
+        double step=0;
+        if(cJSON_GetObjectItemCaseSensitive(r,"step_id") && !integer(r,"step_id",step,0,UINT32_MAX)) return false;
         display_.update([=](DisplayState& s) {
+            s.navigationReceivedMs=nowMs(); s.navigationStep=static_cast<uint32_t>(step);
+            s.navigationSdk=source=="Google Navigation SDK";
             s.navigationActive=active; s.maneuver=maneuver; s.distance=distance; s.road=road; s.eta=eta;
             s.navigationStatus=reliable?"From phone navigation":"Instruction unavailable";
         }); return true;

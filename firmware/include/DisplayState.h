@@ -9,7 +9,9 @@ struct DisplayState {
     bool connected=false, demo=false, gpsValid=false, navigationActive=false, playing=false, artworkPresent=false;
     float speedMph=0, speedLimitMph=-1, limitConfidence=0;
     uint32_t gpsAgeMs=UINT32_MAX, limitAgeMs=UINT32_MAX;
-    uint64_t drivingReceivedMs=0, musicReceivedMs=0;
+    uint64_t drivingReceivedMs=0, musicReceivedMs=0, navigationReceivedMs=0;
+    uint32_t navigationStep=0;
+    bool navigationSdk=false;
     std::string clock="--:--";
     std::string title="No music", artist="Connect your phone", album, distance, road, eta;
     std::string maneuver="unknown", navigationStatus="No active route";

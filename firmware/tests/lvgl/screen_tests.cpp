@@ -204,6 +204,15 @@ int main() {
     save("half-scale-artwork.ppm");
     setScreenArtwork(driving,navigation,music,nullptr); lv_image_cache_drop(&image);
     updateAll(0,false); render(display);
+    VolumeOverlay volume;
+    volume.create(lv_layer_top());
+    volume.show(50,true,false); render(display); save("volume-overlay.ppm");
+    auto* overlay=lv_obj_get_child(lv_layer_top(),lv_obj_get_child_count(lv_layer_top())-1);
+    assert(!lv_obj_has_flag(overlay,LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_get_x(overlay)==100 && lv_obj_get_width(overlay)==280);
+    volume.show(0,true,false); render(display); save("volume-muted.ppm");
+    auto* value=labelAt(overlay,36); assert(std::string(lv_label_get_text(value))=="MUTED");
+    volume.hide(); render(display); assert(lv_obj_has_flag(overlay,LV_OBJ_FLAG_HIDDEN));
     lv_mem_monitor_t memory{}; lv_mem_monitor(&memory);
     assert(memory.max_used<48*1024);
     std::printf("PASS:3-screen shared artwork, thumbnail pixels, circle bounds, detach/free/replacement, CRC guards, metadata/no redraw, %u safe DMA stripes; LVGL used=%zu free=%zu peak=%zu\n",flushes,memory.total_size-memory.free_size,memory.free_size,memory.max_used);

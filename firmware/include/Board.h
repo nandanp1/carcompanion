@@ -14,6 +14,10 @@ class Board {
 public:
     void init();
     void brightness(uint8_t percent);
+    bool powerShortPress();
+    bool volumeDownPressed() const;
+    bool volumeUpPressed() const;
+    i2c_master_bus_handle_t i2cBus() const { return bus; }
     esp_lcd_panel_handle_t panel=nullptr;
     esp_lcd_panel_io_handle_t io=nullptr;
     esp_lcd_touch_handle_t touch=nullptr;

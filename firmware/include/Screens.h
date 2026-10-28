@@ -49,3 +49,13 @@ private:
 // Keep shared descriptor attachment/detachment identical in production and
 // renderer tests; callers must hold the LVGL mutex on the device.
 void setScreenArtwork(DrivingScreen&,NavigationScreen&,MusicScreen&,const lv_image_dsc_t* image);
+
+class VolumeOverlay {
+public:
+    void create(lv_obj_t* parent);
+    void show(uint8_t volume,bool available,bool speaking);
+    void hide();
+private:
+    lv_obj_t *panel_=nullptr,*title_=nullptr,*value_=nullptr;
+    lv_obj_t* bars_[10]={};
+};

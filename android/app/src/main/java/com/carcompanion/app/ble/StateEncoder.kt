@@ -33,6 +33,7 @@ object StateEncoder {
             .put("road", nullable(road.bounded(96).ifBlank { null }))
             .put("eta", nullable(etaText.bounded(32).ifBlank { null }))
             .put("reliable", reliable).put("source", source.bounded(96))
+            .put("step_id", stepId.coerceIn(0, 0xffffffffL))
     }
     fun music(state: DisplayState): JSONObject = with(state.music) {
         val json = JSONObject().put("track_id", trackId.bounded(128)).put("title", title.bounded(128))

@@ -50,6 +50,8 @@ data class NavigationState(
     val reliable: Boolean = false,
     /** Separate presence confirmation; null keeps structured/mock providers' update timeout. */
     val routeConfirmedAtElapsedMs: Long? = null,
+    /** SDK step identity for device-side speech deduplication; 0 means unavailable. */
+    val stepId: Long = 0,
 ) {
     fun fresh(nowElapsedMs: Long): NavigationState {
         if (!active) return this

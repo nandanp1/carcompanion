@@ -1,5 +1,6 @@
 #include "Board.h"
 #include "driver/spi_master.h"
+#include "driver/gpio.h"
 #include "esp_lcd_sh8601.h"
 #include "esp_lcd_touch_cst9217.h"
 #include "XPowersLib.h"
@@ -38,6 +39,12 @@ void Board::init() {
     i2c_device_config_t p={}; p.dev_addr_length=I2C_ADDR_BIT_LEN_7; p.device_address=0x34; p.scl_speed_hz=100000;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&p,&pmic));
     ESP_ERROR_CHECK(power.begin(0x34,pmicRead,pmicWrite)?ESP_OK:ESP_FAIL);
+    // Side keys: BOOT=GPIO9, KEY/IO10=GPIO10. PWR is AXP2101 PWRON.
+    gpio_config_t buttons={}; buttons.pin_bit_mask=(1ULL<<9)|(1ULL<<10);
+    buttons.mode=GPIO_MODE_INPUT; buttons.pull_up_en=GPIO_PULLUP_ENABLE;
+    ESP_ERROR_CHECK(gpio_config(&buttons));
+    power.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+    uint8_t clearShort=0x08; pmicWrite(0x34,0x49,&clearShort,1);
     // Factory example voltage rails. Keep charger configuration at factory
     // settings: this project neither needs nor assumes an attached battery.
     power.setDC1Voltage(3300); power.setALDO1Voltage(3300); power.setALDO2Voltage(3300);
@@ -80,4 +87,14 @@ void Board::init() {
 void Board::brightness(uint8_t percent) {
     const uint8_t value=static_cast<uint8_t>(std::min<uint16_t>(percent,100)*255/100);
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io,0x02005100,&value,1));
+}
+
+bool Board::volumeDownPressed() const { return gpio_get_level(GPIO_NUM_9)==0; }
+bool Board::volumeUpPressed() const { return gpio_get_level(GPIO_NUM_10)==0; }
+bool Board::powerShortPress() {
+    // Read/clear only the PKEY_SHORT W1C bit. Failed I2C reads are never button presses.
+    uint8_t irq=0;
+    if(pmicRead(0x34,0x49,&irq,1)!=0 || !(irq&0x08)) return false;
+    uint8_t clear=0x08;
+    return pmicWrite(0x34,0x49,&clear,1)==0;
 }

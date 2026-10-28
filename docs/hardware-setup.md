@@ -1,10 +1,10 @@
 # Waveshare hardware and firmware setup
 
-This target is **ESP32-C6-Touch-AMOLED-2.16**, including its `-EN` variant. Do not select the 1.43, 1.8, 2.06, or ESP32-S3 board definitions. Firmware requires no Raspberry Pi, Wi-Fi, SD card, audio connection, or Spotify account credentials. Its only radio role is a BLE peripheral.
+This target is **ESP32-C6-Touch-AMOLED-2.16**, including its `-EN` variant. Do not select the 1.43, 1.8, 2.06, or ESP32-S3 board definitions. Firmware requires no Raspberry Pi, Wi-Fi, SD card, phone audio connection, or Spotify account credentials. Its only radio role is a BLE peripheral.
 
 ## Verified manufacturer sources
 
-The [official product documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) identifies a 160MHz ESP32-C6, 512KiB HP SRAM and 16KiB LP SRAM, 16MiB flash, a 480×480 CO5300 QSPI AMOLED, CST9220 I²C capacitive touch, QMI8658 IMU, PCF85063 RTC, AXP2101 PMIC, TF/microSD slot, ES8311 audio codec, ES7210 ADC and microphones. There is **no PSRAM**. These resources are present on the board; this application initializes the PMIC, display, touch and BLE only. It does not claim to use the optional IMU, RTC, SD or audio devices.
+The [official product documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) identifies a 160MHz ESP32-C6, 512KiB HP SRAM and 16KiB LP SRAM, 16MiB flash, a 480×480 CO5300 QSPI AMOLED, CST9220 I²C capacitive touch, QMI8658 IMU, PCF85063 RTC, AXP2101 PMIC, TF/microSD slot, ES8311 audio codec, ES7210 ADC and microphones. There is **no PSRAM**. These resources are present on the board; this application initializes the PMIC, display, touch, physical buttons, ES8311 speaker output and BLE. The microphones, IMU, RTC and SD are unused.
 
 Initialization was checked against [Waveshare's official repository](https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.16), commit `294543798f1a44e2f2c4d2976522323f2beee11d`:
 
@@ -29,6 +29,10 @@ The CO5300 is initialized through Espressif's `esp_lcd_sh8601` driver with the m
 | Touch reset | 11 |
 | AXP2101 I²C address | `0x34` |
 | Touch orientation | swap XY, mirror Y |
+| BOOT / KEY buttons | 9 / 10, active low |
+| PWR short press | AXP2101 short-press IRQ, register `0x49` bit 3 |
+| ES8311 I²C address | `0x18` (7-bit) |
+| Speaker I²S MCLK / BCLK / WS / DOUT | 19 / 20 / 22 / 23 |
 
 **Manufacturer example inconsistency:** the IDF example's `main/user_config.h` swaps LCD CS and touch interrupt (CS5/IRQ15), but those constants are not passed to its actual `DisplayPort` constructor. Its running initialization uses the constructor defaults **CS15/IRQ5**, matching the official Arduino example. This project uses those actual values explicitly. See [manufacturer schematic](https://files.waveshare.com/wiki/ESP32-C6-Touch-AMOLED-2.16/ESP32-C6-Touch-AMOLED-2.16-Schematic.pdf) when checking board revisions. Do not “correct” the project to the unused swapped header values.
 
@@ -49,7 +53,7 @@ idf.py set-target esp32c6
 idf.py build
 ```
 
-The component manager downloads exact versions from `src/idf_component.yml`: LVGL 9.5.0, `esp_lcd_sh8601` 1.0.0, and `esp_lcd_touch_cst9217` 1.0.4. `dependencies.lock` pins their resolved transitive components too. JPEG uses the ESP32-C6 ROM TJpgDec exposed by IDF's `rom/tjpgd.h`, also used internally by Espressif's `esp_jpeg` component. Our own callbacks bound both reads and skips and check output rectangles before RGB888→RGB565 conversion; the decoder uses 3,100 bytes of scratch. XPowersLib 0.3.3 is vendored with its MIT license. Generated speed/dash fonts retain the Montserrat SIL Open Font License under `licenses/`.
+The component manager downloads exact versions from `src/idf_component.yml`: esp_codec_dev 1.4.0, LVGL 9.5.0, `esp_lcd_sh8601` 1.0.0, and `esp_lcd_touch_cst9217` 1.0.4. `dependencies.lock` pins their resolved transitive components too. JPEG uses the ESP32-C6 ROM TJpgDec exposed by IDF's `rom/tjpgd.h`, also used internally by Espressif's `esp_jpeg` component. Our own callbacks bound both reads and skips and check output rectangles before RGB888→RGB565 conversion; the decoder uses 3,100 bytes of scratch. XPowersLib 0.3.3 is vendored with its MIT license. Generated speed/dash fonts retain the Montserrat SIL Open Font License under `licenses/`.
 
 For bench simulation, run `idf.py menuconfig`, choose **Car Companion → Show clearly labeled simulated driving/music/navigation data**, save, rebuild and flash. The build default is OFF. The Android app can also explicitly enable/disable demo mode over BLE. Autonomous mock speed and navigation run only while disconnected; while connected, the phone's shared preview state supplies the demo. Demo screens are visibly labeled and do not invent a speed limit.
 
@@ -96,7 +100,7 @@ There is only one decoded image, shared by all three screens. Driving and Naviga
 
 New state, artwork and completed swipe gestures wake the display task immediately; the LVGL refresh and touch timers target 16ms. Independent 100ms updates keep playback progress and data-age checks moving even when the phone sends nothing. Animations are 180ms. The 16ms timer is a scheduling target, not a measured 60fps claim: 40MHz quad-SPI needs at least 23.04ms for a full 480×480 RGB565 frame before command and rendering overhead. Partial updates can be faster. This project retains the manufacturer's verified display bus clock. Brightness is clamped to 5–100% and persisted in NVS. The last manual page persists; navigation activation temporarily selects navigation and route termination restores the page selected before that route. Manual selection remains possible during navigation.
 
-The current performance/diagnostic build was cross-compiled successfully with ESP-IDF v5.5.3: application binary 1,380,816 bytes, static DIRAM 213,832 bytes, and 238,280 bytes of linker-reported DIRAM remaining **before runtime allocations**. This is not a measurement of free heap on running hardware. The sanitizer suite and 19,440 production framing/oracle comparisons passed. Timing changes and radio coexistence still require the manual hardware checklist.
+The earlier performance/diagnostic build was cross-compiled successfully with ESP-IDF v5.5.3: application binary 1,380,816 bytes, static DIRAM 213,832 bytes, and 238,280 bytes of linker-reported DIRAM remaining **before runtime allocations**. This is not a measurement of free heap on running hardware. The sanitizer suite and 19,440 production framing/oracle comparisons passed. Timing changes and radio coexistence still require the manual hardware checklist.
 
 ### Performance and artwork diagnostics
 
@@ -111,3 +115,15 @@ Every five seconds with rendered changes, `Display` reports render count, averag
 Use a regulated automotive USB supply, secure the enclosure and cable, and keep the display clear of the driver's sight lines, mirror adjustment and airbags. This is a secondary informational display: retain the vehicle's original instruments. GPS is not a vehicle speed sensor and can be absent or delayed. Avoid placing a lithium battery in a hot windshield-mounted enclosure; the manufacturer offers the `-EN` version without an included battery. Test stationary before a passenger conducts road validation.
 
 Validate both wired Android Auto + BLE and wireless Android Auto + BLE with your actual Android phone and Alpine unit. The firmware exposes no Bluetooth audio profile, and the Android app requests no audio routing or focus change. Coexistence still requires physical radio and OEM background-service testing. The repository's automated builds cannot certify those physical behaviors.
+
+## Navigation speaker and physical buttons (0.3.0)
+
+With the screen facing you, BOOT lowers navigation volume and KEY raises it, in 5% steps. Holding a button repeats the adjustment. A ten-bar overlay shows the level; zero mutes. Volume is saved after adjustment stops. Short-press the middle PWR button to cycle Navigation → Driving → Music. The PMIC retains its long-press power behavior; BOOT retains its startup bootloader function. Touch gestures and Spotify transport controls remain available.
+
+Hold both outer buttons for one second to play the stationary speaker test at the selected volume. The ES8311 uses the manufacturer's `07_Audio_Test` C6 board pin map, shared I²C bus, 16 kHz stereo I²S (duplicated mono), and the board's speaker output. Connect the speaker to the board's designated speaker connector. No Bluetooth audio profile or microphone capture is used.
+
+The Android companion silences its Navigation SDK audio. The display generates English maneuver and approach-distance prompts from an embedded phrase bank, independently of phone audio. Street names remain on screen; roundabouts ask you to follow the displayed exit. This is a limited local voice vocabulary, not a stream of Google's spoken instructions. Demo, disconnected, stale (5 seconds), unknown and inactive navigation states do not produce turn prompts. Changed steps cancel queued speech, and repeated snapshots do not repeat instructions. New phones send an optional `step_id` to distinguish consecutive identical maneuvers. Updating the phone to 0.3.0 is required to silence its existing guidance.
+
+The phrase bank is generated with eSpeak NG 1.52 and ffmpeg by `python3 tools/generate_navigation_voice.py`; those tools are build-time conveniences, not firmware dependencies. Generated PCM is committed, so normal builds need neither tool. See `firmware/assets/README.md`. Host tests cover prompt gating, threshold progression, duplicate suppression, button debounce/repeat and volume-overlay rendering. Actual audibility, volume, buttons and driving timing require physical testing.
+
+Validation for the 0.3.0 build: 129 Android unit tests, debug APK and lint passed; all three firmware host suites passed, including LVGL rendering; the sanitizer protocol oracle passed 19,440 comparisons. The 2,276,528-byte application was flashed to the connected ESP32-C6 app partition and independently verified, with a backup of the old application and partition/NVS region. Boot logs confirmed ES8311 output ready at 16 kHz, firmware 0.3.0, and encrypted reconnection with the existing bond. Acoustic output and physical-button actions still need the stationary user test; initialization logs alone do not prove audibility.

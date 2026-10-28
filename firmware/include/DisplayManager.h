@@ -1,5 +1,7 @@
 #pragma once
 #include "Board.h"
+#include "NavigationAudio.h"
+#include "ButtonDebouncer.h"
 #include "ArtworkBuffer.h"
 #include "SettingsManager.h"
 #include "Screens.h"
@@ -11,7 +13,7 @@
 #include <atomic>
 class DisplayManager {
 public:
-    void init(Board&,SettingsManager&,std::function<void(uint8_t)> playback);
+    void init(Board&,SettingsManager&,NavigationAudio&,std::function<void(uint8_t)> playback);
     void update(const std::function<void(DisplayState&)>&);
     void connected(bool);
     void setBrightness(uint8_t);
@@ -27,6 +29,13 @@ private:
     static void renderEvent(lv_event_t*);
     void wake();
     void refresh();
+    void pollButtons(uint64_t now);
+    NavigationAudio* audio_=nullptr;
+    ButtonDebouncer downButton_,upButton_;
+    VolumeOverlay volumeOverlay_;
+    uint64_t volumeUntil_=0,volumeSaveAt_=0,lastPowerPoll_=0,bothSince_=0;
+    bool bothTested_=false;
+
     Board* board_=nullptr; SettingsManager* settings_=nullptr;
     SemaphoreHandle_t gui_=nullptr,stateMutex_=nullptr,flushDone_=nullptr;
     TaskHandle_t task_=nullptr;

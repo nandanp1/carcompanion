@@ -81,3 +81,7 @@ The phone app is in `android/`, display software in `firmware/`, and setup guide
 For more detail: [testing](docs/testing.md), [troubleshooting](docs/troubleshooting.md), [Maps integration](docs/navigation-integration.md) and [Bluetooth protocol](protocol/specification.md).
 
 An independent enthusiast project, [MIT licensed](LICENSE) and unaffiliated with Porsche. Built using [Waveshare's documentation and examples](docs/hardware-setup.md#verified-manufacturer-sources). See [third-party credits](THIRD_PARTY_NOTICES.md) for library and font licenses.
+
+### Device navigation speech and buttons
+
+Version 0.3.0 moves spoken maneuver cues to the ESP32's ES8311 speaker output and silences the companion's phone guidance. The device speaks English turns and approach distances from a local phrase bank; street names remain on screen. With the screen facing you, **BOOT lowers volume**, **KEY raises volume**, and a **short PWR press cycles pages**. A volume bar appears while adjusting, and the level is remembered. Hold both outer buttons for one second for a speaker test. Install the matching phone update to mute its previous guidance. See [hardware setup](docs/hardware-setup.md#navigation-speaker-and-physical-buttons-030).

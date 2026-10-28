@@ -207,3 +207,29 @@ void MusicScreen::update(const DisplayState& s,uint64_t now,uint32_t cachedCrc,b
 void setScreenArtwork(DrivingScreen& driving,NavigationScreen& navigation,MusicScreen& music,const lv_image_dsc_t* image) {
     driving.artwork(image); navigation.artwork(image); music.artwork(image);
 }
+
+void VolumeOverlay::create(lv_obj_t* parent) {
+    panel_=lv_obj_create(parent); lv_obj_set_size(panel_,280,118); lv_obj_set_pos(panel_,100,65);
+    lv_obj_set_style_bg_color(panel_,lv_color_hex(0x141B21),0);
+    lv_obj_set_style_bg_opa(panel_,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(panel_,lv_color_hex(0x5B9DDC),0);
+    lv_obj_set_style_border_width(panel_,1,0); lv_obj_set_style_radius(panel_,16,0);
+    lv_obj_set_style_pad_all(panel_,0,0);
+    lv_obj_remove_flag(panel_,static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+    title_=singleLineLabel(panel_,"NAVIGATION VOLUME",15,12,250,&lv_font_montserrat_16);
+    value_=singleLineLabel(panel_,"50%",15,36,250,&lv_font_montserrat_24);
+    for(int i=0;i<10;++i) {
+        bars_[i]=lv_obj_create(panel_); lv_obj_set_size(bars_[i],18,24);
+        lv_obj_set_pos(bars_[i],24+i*23,78); lv_obj_set_style_radius(bars_[i],3,0);
+        lv_obj_set_style_border_width(bars_[i],0,0);
+        lv_obj_remove_flag(bars_[i],static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+    }
+    hide();
+}
+void VolumeOverlay::show(uint8_t volume,bool available,bool speaking) {
+    lv_obj_remove_flag(panel_,LV_OBJ_FLAG_HIDDEN);
+    set(title_,available?(speaking?"NAVIGATION SPEAKING":"NAVIGATION VOLUME"):"SPEAKER UNAVAILABLE");
+    set(value_,volume?std::to_string(volume)+"%":"MUTED");
+    for(int i=0;i<10;++i) lv_obj_set_style_bg_color(bars_[i],lv_color_hex(volume>i*10?0x9ACDF1:0x303B44),0);
+}
+void VolumeOverlay::hide() { lv_obj_add_flag(panel_,LV_OBJ_FLAG_HIDDEN); }

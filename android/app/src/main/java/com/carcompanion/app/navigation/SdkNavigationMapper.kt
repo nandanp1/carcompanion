@@ -16,7 +16,8 @@ object SdkNavigationMapper {
             val turn = maneuver(step?.maneuver ?: GoogleManeuver.UNKNOWN)
             NavigationState(true, turn, distance(info.distanceToCurrentStepMeters),
                 step?.fullRoadName.orEmpty().take(90), duration(info.timeToFinalDestinationSeconds), now,
-                "Google Navigation SDK", turn != Maneuver.UNKNOWN)
+                "Google Navigation SDK", turn != Maneuver.UNKNOWN,
+                stepId = step?.stepNumber?.takeIf { it >= 0 }?.toLong()?.plus(1) ?: 0)
         }
         NavState.REROUTING -> NavigationState(active = true, road = "Rerouting…",
             updatedAtElapsedMs = now, source = "Google Navigation SDK")

@@ -33,8 +33,8 @@ void DisplayManager::flush(lv_display_t* display,const lv_area_t* area,uint8_t* 
     esp_err_t err=esp_lcd_panel_draw_bitmap(self->board_->panel,area->x1,area->y1,area->x2+1,area->y2+1,data);
     if(err!=ESP_OK) { ESP_LOGE("Display","flush: %s",esp_err_to_name(err)); xSemaphoreGive(self->flushDone_); }
 }
-void DisplayManager::init(Board& board,SettingsManager& settings,std::function<void(uint8_t)> playback) {
-    board_=&board; settings_=&settings; pages_=PageNavigation(settings.page()); shown_=pages_.visible();
+void DisplayManager::init(Board& board,SettingsManager& settings,NavigationAudio& audio,std::function<void(uint8_t)> playback) {
+    audio_=&audio; board_=&board; settings_=&settings; pages_=PageNavigation(settings.page()); shown_=pages_.visible();
     gui_=xSemaphoreCreateMutex(); stateMutex_=xSemaphoreCreateMutex(); flushDone_=xSemaphoreCreateBinary();
     assert(gui_ && stateMutex_ && flushDone_);
     lv_init(); lv_tick_set_cb(tick); lvDisplay_=lv_display_create(480,480);
@@ -54,6 +54,7 @@ void DisplayManager::init(Board& board,SettingsManager& settings,std::function<v
     ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(board.io,&cb,this));
     screens_[0]=navigation_.create(); screens_[1]=driving_.create(); screens_[2]=music_.create(playback);
     lv_screen_load(screens_[static_cast<int>(shown_)]);
+    volumeOverlay_.create(lv_layer_top());
     touch_.init(board,lvDisplay_,[this](int dx,int dy,uint32_t duration) {
         if(pages_.swipe(dx,dy,duration)) { settings_->setPage(pages_.selected()); wake(); }
     });
@@ -78,6 +79,7 @@ void DisplayManager::run(void* ptr) {
     uint64_t last=0;
     while(true) {
         xSemaphoreTake(self->gui_,portMAX_DELAY);
+        self->pollButtons(millis());
         if(self->dirty_.exchange(false) || millis()-last>=100) { self->refresh(); last=millis(); }
         const uint32_t delay=lv_timer_handler();
         xSemaphoreGive(self->gui_);
@@ -109,6 +111,10 @@ void DisplayManager::refresh() {
         state_.maneuver="right"; state_.distance="500 ft"; state_.road="Demo Avenue"; state_.eta="";
     }
     const DisplayState snapshot=state_; xSemaphoreGive(stateMutex_);
+    audio_->update(snapshot,now);
+    if(now<volumeUntil_) volumeOverlay_.show(audio_->volume(),audio_->ready(),audio_->speaking());
+    else volumeOverlay_.hide();
+    if(volumeSaveAt_ && now>=volumeSaveAt_) { settings_->setVolume(audio_->volume()); volumeSaveAt_=0; }
     const Page selectedBefore=pages_.selected();
     pages_.navigation(snapshot.navigationActive && (snapshot.connected || snapshot.demo));
     if(pages_.selected()!=selectedBefore) settings_->setPage(pages_.selected());
@@ -161,4 +167,30 @@ void DisplayManager::artwork(ArtworkBuffer&& pixels,uint16_t width,uint16_t heig
     setScreenArtwork(driving_,navigation_,music_,&image_);
     xSemaphoreGive(gui_);
     wake();
+}
+
+void DisplayManager::pollButtons(uint64_t now) {
+    const bool down=board_->volumeDownPressed(),up=board_->volumeUpPressed();
+    const bool lower=downButton_.poll(down,now),raise=upButton_.poll(up,now);
+    if(down && up) {
+        if(!bothSince_) bothSince_=now;
+        if(!bothTested_ && now-bothSince_>=1000) {
+            bothTested_=true; audio_->test(); volumeUntil_=now+5000; wake();
+        }
+    } else {
+        bothSince_=0; bothTested_=false;
+        if(lower || raise) {
+            const int next=std::clamp<int>(audio_->volume()+(raise?5:-5),0,100);
+            audio_->setVolume(next); volumeUntil_=now+2200; volumeSaveAt_=now+800;
+            ESP_LOGI("Buttons","navigation volume=%d",next); wake();
+        }
+    }
+    if(now-lastPowerPoll_>=100) {
+        lastPowerPoll_=now;
+        if(board_->powerShortPress()) {
+            pages_.select(static_cast<Page>((static_cast<unsigned>(pages_.visible())+1)%3));
+            settings_->setPage(pages_.selected());
+            ESP_LOGI("Buttons","page=%u",static_cast<unsigned>(pages_.visible())); wake();
+        }
+    }
 }
