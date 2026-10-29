@@ -78,3 +78,11 @@ Android Auto is no longer required. The phone runs navigation and Spotify, and s
 - [Adaptive vector icons and monochrome layers](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive)
 - [Android sticky service restart behavior](https://developer.android.com/reference/android/app/Service#START_STICKY)
 - [Foreground service background-start and location restrictions](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)
+
+### Sharing troubleshooting (0.3.1)
+
+If the share sheet fails, open **Car Companion → Overview → Enter destination or Maps link**. Paste the Maps link or type the full destination address, tap **Find destination**, check the candidate, then **Start navigation**. The same editable field is available on the share screen after a lookup error. Editing it clears the previous selection so a stale destination cannot be started accidentally.
+
+The resolver accepts direct destination links, bounded HTTP redirects, and HTML landing pages with a single supported canonical/Open Graph Maps URL. It also handles shared ClipData text, repeated copies of one link, `loc:` coordinates and Maps search paths. It never substitutes the camera location or a page title for the destination. Some Google link formats, consent pages, or pages without a destination URL still require entering the address; arbitrary JavaScript is not executed. Geocoding and Google navigation still require connectivity and a correctly authorized Navigation SDK key. Phone voice guidance remains enabled.
+
+The sharing regression suite uses deterministic transport responses, including HTTP 200 landing pages, redirects, loops, unsupported hosts and HTTP failures. Without an attached phone or the failing link, these tests do not establish which failure occurred on the user's installed app.

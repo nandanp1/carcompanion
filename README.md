@@ -85,3 +85,5 @@ An independent enthusiast project, [MIT licensed](LICENSE) and unaffiliated with
 ### Device navigation speech and buttons
 
 Version 0.3.0 adds spoken maneuver cues through the ESP32's ES8311 speaker output while keeping phone voice guidance enabled. The device speaks English turns and approach distances from a local phrase bank; street names remain on screen. With the screen facing you, **KEY lowers volume**, **BOOT raises volume**, and a **short PWR press cycles pages**. A volume bar appears while adjusting, and the level is remembered. Hold both outer buttons for one second for a speaker test. See [hardware setup](docs/hardware-setup.md#navigation-speaker-and-physical-buttons-030).
+
+Sharing recovery: version 0.3.1 adds **Overview → Enter destination or Maps link**, plus retry/edit controls on the share screen. See [sharing troubleshooting](docs/android-setup.md#sharing-troubleshooting-031).

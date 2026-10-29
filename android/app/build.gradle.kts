@@ -18,8 +18,8 @@ android {
         applicationId = "com.carcompanion.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.3.1"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -38,6 +38,7 @@ android {
 }
 
 dependencies {
+    implementation("org.jsoup:jsoup:1.23.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("com.google.android.libraries.navigation:navigation:8.0.0")
     implementation(platform("androidx.compose:compose-bom:2025.11.01"))

@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 
 class ShareNavigationActivity : ComponentActivity() {
+    private var input by mutableStateOf("")
     private var destinations by mutableStateOf<List<SharedMapsDestination>>(emptyList())
     private var selected by mutableStateOf<SharedMapsDestination?>(null)
     private var message by mutableStateOf("Opening shared destination…")
@@ -51,6 +52,13 @@ class ShareNavigationActivity : ComponentActivity() {
                         Text("Drive with Car Companion", style = MaterialTheme.typography.headlineMedium)
                         Text(message)
                         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        OutlinedTextField(value = input, onValueChange = { input = it.take(16_384); selected = null; destinations = emptyList() },
+                            label = { Text("Maps link or destination address") }, enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(), maxLines = 3)
+                        OutlinedButton(onClick = { resolveInput(input, allowAddress = true) },
+                            enabled = !busy && input.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                            Text("Find destination")
+                        }
                         destinations.forEach { destination ->
                             Card(Modifier.fillMaxWidth().clickable(enabled = !busy) { selected = destination }) {
                                 Row(Modifier.padding(12.dp)) {
@@ -82,17 +90,35 @@ class ShareNavigationActivity : ComponentActivity() {
     }
     private fun handleShare(intent: Intent) {
         resolution?.cancel()
+        ++shareGeneration
+        destinations = emptyList()
+        selected = null
+        val extra = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+        val clips = intent.clipData?.let { clip ->
+            (0 until clip.itemCount.coerceAtMost(10)).mapNotNull { index ->
+                clip.getItemAt(index).let { it.text?.toString() ?: it.uri?.toString() }
+            }.joinToString("\n")
+        }
+        val text = if (intent.action == Intent.ACTION_SEND && intent.type?.substringBefore(';') == "text/plain")
+            extra?.takeIf { it.isNotBlank() } ?: clips else null
+        input = text.orEmpty().take(16_384)
+        if (text.isNullOrBlank()) {
+            busy = false
+            message = "Share from Google Maps, or paste a link or destination address below."
+            return
+        }
+        resolveInput(text, allowAddress = false)
+    }
+    private fun resolveInput(text: String, allowAddress: Boolean) {
+        resolution?.cancel()
         val request = ++shareGeneration
         destinations = emptyList()
         selected = null
         busy = true
-        message = "Opening shared destination…"
-        val text = if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
-        if (text.isNullOrBlank()) { busy = false; message = "In Google Maps, open a destination and choose Share → Car Companion."; return }
+        message = "Finding destination…"
         resolution = lifecycleScope.launch {
             try {
-                val resolved = SharedMapsResolver(this@ShareNavigationActivity).resolve(text)
+                val resolved = SharedMapsResolver(this@ShareNavigationActivity).resolve(text, allowAddress)
                 if (request != shareGeneration) return@launch
                 destinations = resolved
                 selected = destinations.singleOrNull()

@@ -18,7 +18,7 @@ object SharedMapsLinkParser {
         require(text.length <= 16_384) { "The shared text is too long." }
         val urls = Regex("https?://[^\\s<>]+").findAll(text).mapNotNull {
             runCatching { URI(it.value) }.getOrNull()?.takeIf(::isAllowed)
-        }.toList()
+        }.distinct().toList()
         require(urls.size == 1) { "Share one destination link from Google Maps." }
         return urls.single()
     }
@@ -46,12 +46,16 @@ object SharedMapsLinkParser {
         if (!placeId.isNullOrBlank()) return SharedMapsDestination(
             label = target?.takeUnless { it.startsWith("place_id:") }?.take(200) ?: "Shared Google Maps place",
             placeId = placeId.takeIf { it.length <= 256 } ?: error("Invalid place ID."))
-        if (!target.isNullOrBlank()) return target(target)
+        if (!target.isNullOrBlank() && !target.startsWith("cid:") && !target.startsWith("0x")) return target(target.removePrefix("loc:"))
         val path = decode(uri.rawPath.orEmpty())
         if (path.startsWith("/maps/dir/")) {
             val parts = path.removePrefix("/maps/dir/").split('/').takeWhile { !it.startsWith('@') && !it.startsWith("data=") }.filter { it.isNotBlank() }
             require(parts.size <= 2) { "Share the destination itself; multi-stop routes are not supported yet." }
             return parts.lastOrNull()?.let(::target)
+        }
+        if (path.startsWith("/maps/search/")) {
+            val name = path.removePrefix("/maps/search/").substringBefore('/')
+            if (name.isNotBlank()) return target(name)
         }
         if (path.startsWith("/maps/place/")) {
             val name = path.removePrefix("/maps/place/").substringBefore('/').take(200)

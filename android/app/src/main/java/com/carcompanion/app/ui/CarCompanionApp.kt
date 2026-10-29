@@ -1,6 +1,8 @@
 package com.carcompanion.app.ui
 
 import android.content.Context
+import android.content.Intent
+import com.carcompanion.app.navigation.ShareNavigationActivity
 import android.graphics.BitmapFactory
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
@@ -129,6 +131,8 @@ private fun Overview(state: DisplayState, diagnostics: Diagnostics, artwork: Art
         Text("Google Maps navigation", fontWeight = FontWeight.Medium)
         Text(diagnostics.navigationStatus, color = Muted, fontSize = 12.sp)
         Text("In Google Maps, open your destination and choose Share → Car Companion. Confirm the destination to start driving directions.", color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+        val navigationContext = LocalContext.current
+        TextButton(onClick = { navigationContext.startActivity(Intent(navigationContext, ShareNavigationActivity::class.java)) }) { Text("Enter destination or Maps link") }
         if (!state.demo) TextButton(onClick = { GoogleNavigationSession.stop() }) { Text("Stop navigation") }
         Text("Phone voice guidance stays enabled. Use the display’s physical buttons to adjust its speaker volume.", color = Muted, fontSize = 12.sp)
         Text("Google Maps", color = Color.White, fontSize = 12.sp)

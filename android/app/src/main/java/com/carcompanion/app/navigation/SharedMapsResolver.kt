@@ -6,34 +6,42 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.net.HttpURLConnection
-import java.net.URI
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import java.util.Locale
 
 class SharedMapsResolver(private val context: Context) {
-    suspend fun resolve(text: String): List<SharedMapsDestination> = withTimeout(35_000) {
+    suspend fun resolve(text: String, allowAddress: Boolean = false): List<SharedMapsDestination> = withTimeout(35_000) {
         withContext(Dispatchers.IO) {
-            var uri = SharedMapsLinkParser.sharedUrl(text)
-            var destination = SharedMapsLinkParser.parse(uri)
-            var redirects = 0
-            while (destination == null && redirects++ < 5) {
-                require(SharedMapsLinkParser.isAllowed(uri)) { "Unsupported Maps redirect." }
+            val lookupContext = coroutineContext
+            val resolved = if (allowAddress && !text.contains(Regex("https?://", RegexOption.IGNORE_CASE))) {
+                val address = text.trim()
+                require(address.length in 1..500) { "Enter a destination address (up to 500 characters)." }
+                SharedMapsDestination(address, address = address)
+            } else MapsLinkExpansion { uri ->
+                lookupContext.ensureActive()
                 val connection = uri.toURL().openConnection() as HttpURLConnection
                 try {
                     connection.instanceFollowRedirects = false
                     connection.connectTimeout = 5_000
                     connection.readTimeout = 5_000
-                    connection.setRequestProperty("User-Agent", "CarCompanion/0.2")
+                    connection.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; CarCompanion/0.3.1)")
                     val code = connection.responseCode
-                    require(code in listOf(301, 302, 303, 307, 308)) {
-                        "This Maps link could not be resolved. Share the place itself, or a Maps link with its address."
-                    }
-                    val next = connection.getHeaderField("Location") ?: error("Maps returned an empty redirect.")
-                    uri = uri.resolve(URI(next))
-                    require(SharedMapsLinkParser.isAllowed(uri)) { "Unsupported Maps redirect." }
-                    destination = SharedMapsLinkParser.parse(uri)
+                    val html = if (code == 200) connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                        val result = StringBuilder()
+                        val buffer = CharArray(4096)
+                        while (true) {
+                            lookupContext.ensureActive()
+                            val count = reader.read(buffer)
+                            if (count < 0) break
+                            require(result.length + count <= 1_048_576) { "Maps response is too large. Enter the destination address below." }
+                            result.append(buffer, 0, count)
+                        }
+                        result.toString()
+                    } else ""
+                    MapsLinkExpansion.Response(code, connection.getHeaderField("Location"), html)
                 } finally { connection.disconnect() }
-            }
-            val resolved = destination ?: error("Too many Maps redirects. Share the destination itself.")
+            }.resolve(SharedMapsLinkParser.sharedUrl(text))
             if (resolved.address == null) return@withContext listOf(resolved)
             require(Geocoder.isPresent()) { "Address lookup is unavailable on this phone. Share a pinned location from Maps." }
             @Suppress("DEPRECATION")

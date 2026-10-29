@@ -44,4 +44,19 @@ class SharedMapsLinkParserTest {
         assertThrows(IllegalArgumentException::class.java) { parse("https://maps.google.com/?q=91,181") }
         assertThrows(IllegalArgumentException::class.java) { SharedMapsLinkParser.sharedUrl("https://maps.app.goo.gl/a https://maps.app.goo.gl/b") }
     }
+    @Test fun repeatedSameLinkIsNotAnAmbiguousShare() {
+        val link = "https://maps.app.goo.gl/example"
+        assertEquals(URI(link), SharedMapsLinkParser.sharedUrl("$link\n$link"))
+    }
+    @Test fun locCoordinatesAreNotSentToAddressGeocoder() {
+        val value = parse("https://maps.google.com/?q=loc:37.5,-122.2")!!
+        assertEquals(37.5, value.latitude!!, 0.0001)
+        assertNull(value.address)
+    }
+    @Test fun searchPathAddressIsSupported() {
+        assertEquals("123 Main Street", parse("https://www.google.com/maps/search/123+Main+Street/")!!.address)
+    }
+    @Test fun cidQueryIsNotMistakenForAnAddress() {
+        assertNull(parse("https://maps.google.com/?q=cid:123456789"))
+    }
 }
